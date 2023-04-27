@@ -1,7 +1,6 @@
 const DIM:usize = 32;
 
-use std::{cell::Cell, borrow::Borrow};
-use std::rc::Rc;
+use std::{rc::Rc, default};
 
 // pub trait Neighbor {
 //     fn neighbor_east() -> Self;
@@ -238,6 +237,15 @@ impl CellsGettable for Square {
 }
 
 impl FullSquare {
+    fn new () -> Self { //initializes a FullSquare with all cells dead
+        let mut cells:[[bool;DIM];DIM] = Default::default(); //TODO use something better
+        for i in 0..DIM {
+            for j in 0..DIM {
+                cells[i][j] = false;
+            }
+        }
+        Self{cell:cells,alive_cells:0}
+    }
     fn get_cell(&self,x:usize,y:usize) -> bool {
         assert!((0..DIM).contains(&x));
         assert!((0..DIM).contains(&y));
@@ -328,6 +336,18 @@ impl Field {
                 if !hs.contains_key(&key) {
                     hs.insert(key, elem.unwrap());
                 }
+        }
+    }
+
+    fn set_cell(&mut self, coords:(isize,isize), val:bool) {
+        let squarecoords = (coords.0/DIM as isize,coords.1/DIM as isize);
+        let localcoords = (coords.0.rem_euclid(DIM as isize),coords.1.rem_euclid(DIM as isize));
+        match self.vec.get_mut(&squarecoords) {
+            Some(Square::Full(cursquare)) => cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, val),
+            None => {let mut cursquare = FullSquare::new();
+                cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, true);
+                self.vec.insert(squarecoords, Square::Full(cursquare));},
+            _ => panic!()
         }
     }
 
@@ -428,55 +448,41 @@ fn print (f:&Field) {
     frame::Frame,
     prelude::*,
     surface::ImageSurface,
-    window::Window,
+    window::Window, button::ToggleButton
 };
 use std::cell::RefCell;
 struct Canvas {
     frame: Frame,
-    #[allow(dead_code)]
     surf: Rc<RefCell<ImageSurface>>,
     field:Rc<RefCell<Field>>,
     xoffsetref:Rc<RefCell<i32>>,
-    yoffsetref:Rc<RefCell<i32>>
+    yoffsetref:Rc<RefCell<i32>>,
+    linedistref:Rc<RefCell<i32>>,
+    draw_mode:bool
 }
 
 impl Canvas {
-    pub fn new(w: i32, h: i32, field: Rc<RefCell<Field>>,xoffset:i32,yoffset:i32) -> Self {
+    pub fn new(w: i32, h: i32, field: Rc<RefCell<Field>>,xoffset:i32,yoffset:i32, linedist:i32) -> Self {
         let mut frame = Frame::default().with_size(w, h).center_of_parent();
+        let draw_mode = true;        
+        
         frame.set_color(Color::White);
         frame.set_frame(FrameType::DownBox);
 
         let xoffsetref = Rc::new(RefCell::new(xoffset));
         let yoffsetref = Rc::new(RefCell::new(yoffset));
+        let linedistref = Rc::new(RefCell::new(linedist));
 
-        let surf = ImageSurface::new(frame.width(), frame.height(), false);
-        ImageSurface::push_current(&surf);
-        draw_rect_fill(0, 0, w, h, Color::White);
+        let mut surf = ImageSurface::new(frame.width(), frame.height(), false);
 
-        set_draw_color(Color::Black);
-        for xcoord in 0..WIDTH/LINEDIST { //ugly
-            draw_line(xcoord*LINEDIST, 0, xcoord*LINEDIST, HEIGHT);
-        }
-        for ycoord in 0..HEIGHT/LINEDIST { //ugly
-            draw_line(0, ycoord*LINEDIST, WIDTH, ycoord*LINEDIST);
-        }
-        
-        for xcoord in 0..WIDTH/LINEDIST { //ugly
-            for ycoord in 0..HEIGHT/LINEDIST { //ugly
-                if field.borrow_mut().get_cell(xcoord as isize, ycoord as isize) {
-                    //roles of x and y are swapped due to GUI convention
-                    draw_rect_fill(ycoord*LINEDIST, xcoord*LINEDIST,LINEDIST, LINEDIST,Color::Black);
-                }
-            }
-        }
-        ImageSurface::pop_current();
+        Canvas::redraw_canvas_no_ref(&mut frame, &mut surf, &mut field.borrow_mut(), xoffset, yoffset, linedist);       
 
         let surf = Rc::from(RefCell::from(surf));
 
         frame.draw({
             let surf = surf.clone();
             move |f| {
-                let surf = surf.borrow_mut();
+                let surf = surf.borrow();
                 let mut img = surf.image().unwrap();
                 img.draw(f.x(), f.y(), f.w(), f.h());
             }
@@ -489,65 +495,97 @@ impl Canvas {
             let field = field.clone();
             let xoffsetref = xoffsetref.clone();
             let yoffsetref = yoffsetref.clone();
+            let linedistref = linedistref.clone();
 
             move |f, ev| {
-                let mut surf = surf.borrow_mut(); //why not just borrow()?
+                let mut surf = surf.borrow(); //why not just borrow()?
                 let mut field = field.borrow_mut(); //why not just borrow()?
 
                 match ev {
                     Event::Push => {
                         println!("Push");
                         let coords = app::event_coords();
+
+                        println!("{}+{}",coords.0,*xoffsetref.borrow());
+                        println!("{}+{}",coords.1,*yoffsetref.borrow());
+                        println!();
+
                         x = coords.0;
                         y = coords.1;
+
+                        if draw_mode && app::event_mouse_button() == app::MouseButton::Left {
+                            let coords = (((coords.0+*xoffsetref.borrow())/(*linedistref.borrow())) as isize,((coords.1+*yoffsetref.borrow())/(*linedistref.borrow())) as isize);
+                            let curval = field.get_cell(coords.0, coords.1);
+                            field.set_cell(coords, !curval);
+                        }
                         true
                     }
                     Event::Drag => {
                         println!("Drag");
                         let coords = app::event_coords();
 
-                        //mirrored bc of gui convention
-                        let newyoffset = (*yoffsetref.borrow_mut()-(coords.0-x));
-                        let newxoffset = (*xoffsetref.borrow_mut()-(coords.1-y));
+                        let newxoffset = *xoffsetref.borrow()-(coords.0-x);
+                        let newyoffset = *yoffsetref.borrow()-(coords.1-y);
 
-                        yoffsetref.replace(newyoffset);
                         xoffsetref.replace(newxoffset);
+                        yoffsetref.replace(newyoffset);
                         //f.redraw();
-
-                        //Canvas::update_field_no_ref(f,&mut surf,&mut field,newxoffset,newyoffset); //TODO cleanly update after drag
 
                         x = coords.0;
                         y = coords.1;
                         true
                     }
+                    Event::MouseWheel => { //TODO now working properly          
+                        println!("MouseWheel");
+                        let coords: (i32, i32) = app::event_coords();
+
+                        let xoffset = *xoffsetref.borrow();
+                        let yoffset = *yoffsetref.borrow();
+                        let linedist = *linedistref.borrow();
+
+                        match app::event_dy() {
+                            app::MouseWheel::Up => {
+                                if linedist > 2 {
+                                    *xoffsetref.borrow_mut()-= (coords.0+xoffset)/linedist;
+                                    *yoffsetref.borrow_mut()-= (coords.1+yoffset)/linedist;
+                                    (*linedistref.borrow_mut())-=1;
+                                }}, 
+                            app::MouseWheel::Down => {
+                                *xoffsetref.borrow_mut()+= (coords.0+xoffset)/linedist;
+                                *yoffsetref.borrow_mut()+= (coords.1+yoffset)/linedist;
+                                (*linedistref.borrow_mut())+=1;
+                            }, 
+                            _ => ()
+                        }
+                        true
+                    },
                     _ => false,
                 }
             }
         });
-        Self { frame, surf , field, xoffsetref, yoffsetref}
+        Self { frame, surf , field, xoffsetref, yoffsetref, linedistref, draw_mode}
     }
 
-    fn redraw_canvas_no_ref(frame:&mut Frame, surf:&mut ImageSurface, field:&mut Field, xoffset:i32, yoffset:i32) {
-        let xmod = LINEDIST-xoffset.rem_euclid(LINEDIST);
-        let ymod = LINEDIST-yoffset.rem_euclid(LINEDIST);
+    fn redraw_canvas_no_ref(frame:&mut Frame, surf:&mut ImageSurface, field:&mut Field, xoffset:i32, yoffset:i32, linedist:i32) {
+        let xmod = xoffset.rem_euclid(linedist);
+        let ymod = yoffset.rem_euclid(linedist);
         
         ImageSurface::push_current(&surf);
         draw_rect_fill(0, 0, WIDTH, HEIGHT, Color::White);
         
         set_draw_color(Color::Black);
 
-        for xcoord in 0..WIDTH/LINEDIST+1 { //ugly, verify that the +1 ensures enough lines are always visible despite mod
-            draw_line(xcoord*LINEDIST+ymod, 0, xcoord*LINEDIST+ymod, HEIGHT);
+        for xcoord in (linedist-xmod..=WIDTH).step_by(linedist as usize) {
+            draw_line(xcoord, 0, xcoord, HEIGHT);
         }
-        for ycoord in 0..HEIGHT/LINEDIST+1 { //ugly, verify that the +1 ensures enough lines are always visible despite mod
-            draw_line(0, ycoord*LINEDIST+xmod, WIDTH, ycoord*LINEDIST+xmod);
+        for ycoord in (linedist-ymod..=HEIGHT).step_by(linedist as usize) {
+            draw_line(0, ycoord, WIDTH, ycoord);
         }
         
-        for xcoord in -1..HEIGHT/LINEDIST+1 { //ugly, verify that the -1/+1 ensures enough lines are always visible despite mod
-            for ycoord in -1..WIDTH/LINEDIST+1 { //ugly, verify that the 1/+1 ensures enough lines are always visible despite mod
-                if field.get_cell((xcoord+xoffset/LINEDIST) as isize, (ycoord+yoffset/LINEDIST) as isize) {
-                    //roles of x and y are swapped due to GUI convention
-                    draw_rect_fill(ycoord*LINEDIST+ymod, xcoord*LINEDIST+xmod,LINEDIST, LINEDIST,Color::Black);
+        for xcoord in (-xmod..=WIDTH).step_by(linedist as usize) {
+            for ycoord in (-ymod..=HEIGHT).step_by(linedist as usize) {
+                if field.get_cell(((xcoord+xoffset)/linedist) as isize, ((ycoord+yoffset)/linedist) as isize) {
+                    draw_rect_fill(xcoord, ycoord,linedist, linedist,Color::Black);
                 }
             }
         }
@@ -556,20 +594,14 @@ impl Canvas {
     }
 
     fn redraw_canvas(&mut self) {
-        let x:i32 = *self.xoffsetref.borrow_mut();
-        let y:i32 = *self.yoffsetref.borrow_mut();
-        let frame:&mut Frame = &mut self.frame;
-        let surf:&mut ImageSurface = &mut *self.surf.borrow_mut();
-        let field:&mut Field = &mut *self.field.borrow_mut();
-
-        Canvas::redraw_canvas_no_ref(frame, surf, field, x, y);
+        Canvas::redraw_canvas_no_ref(&mut self.frame, &mut *self.surf.borrow_mut(), &mut *self.field.borrow_mut(), *self.xoffsetref.borrow(), *self.yoffsetref.borrow(), *self.linedistref.borrow());
     } 
 }
 
 const WIDTH: i32 = 800;
 const HEIGHT: i32 = 600;
+const TICKTIME: f64 = 0.05; 
 const LINEDIST: i32 = 30;
-const TICKTIME: f64 = 0.1; 
 const UPDATEINTERVALL: f64 = 0.1; 
 const XSTARTOFFSET: i32 = 0;
 const YSTARTOFFSET: i32 = 0;
@@ -624,29 +656,47 @@ fn main() {
         .with_label("Game of Life");
     
     let f = RefCell::new(field);
-    let canvas = Canvas::new(WIDTH, HEIGHT, f.into(), XSTARTOFFSET, YSTARTOFFSET);
+    let canvas = Canvas::new(WIDTH, HEIGHT, f.into(), XSTARTOFFSET, YSTARTOFFSET, LINEDIST);
+    wind.add(&canvas.frame);
 
-    wind.end();
+    let mut btn_stop_toggle = ToggleButton::default().with_label("Stop").with_size(100, 40).with_pos(WIDTH-100,0);
+    
+    btn_stop_toggle.set_callback(move |handle| {
+        if handle.value() {
+            handle.set_label("Start");
+        }
+        else {
+            handle.set_label("Stop");
+        }
+    }); //TODO perhaps add btn to canvas-type
+    wind.add(&btn_stop_toggle);
+    let btn_stop_toggleref = Rc::new(RefCell::new(btn_stop_toggle));
+
+    //wind.end();
     wind.show();
-
-
+    
     let fieldref = canvas.field.clone();
+    let btn_stop_toggleref1 = btn_stop_toggleref.clone();
     let update = move |handle| {
-        fieldref.borrow_mut().update();
-        println!("updateded field");
+        if !btn_stop_toggleref1.borrow_mut().value() {
+            fieldref.borrow_mut().update();
+            println!("updated field");
+        }
         app::repeat_timeout3(UPDATEINTERVALL, handle);
     };
 
     app::add_timeout3(UPDATEINTERVALL, update);
-
+    
     let canvasref = Rc::new(RefCell::new(canvas));
+    let btn_stop_toggleref2 = btn_stop_toggleref.clone();
     let tick = move |handle| {
         canvasref.borrow_mut().redraw_canvas();
+        btn_stop_toggleref2.borrow_mut().redraw();
         println!("updated canvas");
         app::repeat_timeout3(TICKTIME, handle);
     };
 
     app::add_timeout3(TICKTIME, tick);
-
+    
     app.run().unwrap();
 }
