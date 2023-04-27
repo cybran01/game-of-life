@@ -277,6 +277,19 @@ impl Field {
             None => false
         }
     }
+    
+    fn set_cell(&mut self, coords:(isize,isize), val:bool) { //TODO there is some mistake here
+        let localcoords = (coords.0.rem_euclid(DIM as isize),coords.1.rem_euclid(DIM as isize));
+        let squarecoords = ((coords.0-localcoords.0)/DIM as isize,(coords.1-localcoords.1)/DIM as isize);
+
+        match self.vec.get_mut(&squarecoords) {
+            Some(Square::Full(cursquare)) => cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, val),
+            None => {let mut cursquare = FullSquare::new();
+                cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, true);
+                self.vec.insert(squarecoords, Square::Full(cursquare));},
+            _ => panic!()
+        }
+    }
 
     fn eval_cells_alive_on_boundary(&self, x:isize, y:isize) -> i32 { //TODO maybe do this via maxdist of x,y values
         let mut counter = 0;
@@ -336,18 +349,6 @@ impl Field {
                 if !hs.contains_key(&key) {
                     hs.insert(key, elem.unwrap());
                 }
-        }
-    }
-
-    fn set_cell(&mut self, coords:(isize,isize), val:bool) {
-        let squarecoords = (coords.0/DIM as isize,coords.1/DIM as isize);
-        let localcoords = (coords.0.rem_euclid(DIM as isize),coords.1.rem_euclid(DIM as isize));
-        match self.vec.get_mut(&squarecoords) {
-            Some(Square::Full(cursquare)) => cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, val),
-            None => {let mut cursquare = FullSquare::new();
-                cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, true);
-                self.vec.insert(squarecoords, Square::Full(cursquare));},
-            _ => panic!()
         }
     }
 
@@ -514,7 +515,14 @@ impl Canvas {
                         y = coords.1;
 
                         if draw_mode && app::event_mouse_button() == app::MouseButton::Left {
-                            let coords = (((coords.0+*xoffsetref.borrow())/(*linedistref.borrow())) as isize,((coords.1+*yoffsetref.borrow())/(*linedistref.borrow())) as isize);
+                            let xoffset = *xoffsetref.borrow();
+                            let yoffset = *yoffsetref.borrow();
+                            let linedist = *linedistref.borrow();
+
+                            let xmod = (coords.0+xoffset).rem_euclid(linedist);
+                            let ymod = (coords.1+yoffset).rem_euclid(linedist);
+
+                            let coords = (((coords.0+xoffset-xmod)/linedist) as isize,((coords.1+yoffset-ymod)/linedist) as isize);
                             let curval = field.get_cell(coords.0, coords.1);
                             field.set_cell(coords, !curval);
                         }
@@ -535,7 +543,7 @@ impl Canvas {
                         y = coords.1;
                         true
                     }
-                    Event::MouseWheel => { //TODO now working properly          
+                    Event::MouseWheel => { 
                         println!("MouseWheel");
                         let coords: (i32, i32) = app::event_coords();
 
@@ -680,7 +688,7 @@ fn main() {
     let update = move |handle| {
         if !btn_stop_toggleref1.borrow_mut().value() {
             fieldref.borrow_mut().update();
-            println!("updated field");
+            println!("updated field, {} alive chunk", fieldref.borrow().vec.len());
         }
         app::repeat_timeout3(UPDATEINTERVALL, handle);
     };
@@ -692,7 +700,7 @@ fn main() {
     let tick = move |handle| {
         canvasref.borrow_mut().redraw_canvas();
         btn_stop_toggleref2.borrow_mut().redraw();
-        println!("updated canvas");
+        //println!("updated canvas");
         app::repeat_timeout3(TICKTIME, handle);
     };
 
