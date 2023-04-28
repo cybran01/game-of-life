@@ -593,8 +593,8 @@ impl Canvas {
     } 
 }
 
-const WIDTH: i32 = 800;
-const HEIGHT: i32 = 600;
+const WIDTH: i32 = 800*2;
+const HEIGHT: i32 = 600*2;
 const TICKTIME: f64 = 0.05; 
 const LINEDIST: i32 = 30;
 const INITIALUPDATEINTERVALL: f64 = 0.1; 
@@ -603,7 +603,8 @@ const YSTARTOFFSET: i32 = 0;
 
 fltk::widget_extends!(Canvas, Frame, frame);
 
-use fltk::app::remove_timeout3;
+use fltk::app::{remove_timeout3, TimeoutHandle, handle};
+use fltk::enums::Key;
 use fltk::{
     app,
     draw::{draw_line, draw_point, draw_rect_fill, set_draw_color, set_line_style, LineStyle},
@@ -667,55 +668,64 @@ fn main() {
     let canvasref = Rc::new(RefCell::new(canvas));
 
     let mut btn_stop_toggle = ToggleButton::default().with_label("Stop").with_size(100, 40).with_pos(WIDTH-100,0);
+    btn_stop_toggle.set_id("ToggleBtn");
     btn_stop_toggle.set_value(true);
-    btn_stop_toggle.set_shortcut(fltk::enums::Shortcut::from_char(' ')); 
-
-    let mut intervall = Rc::new(RefCell::new(INITIALUPDATEINTERVALL));
+    btn_stop_toggle.set_shortcut(fltk::enums::Shortcut::Alt); 
+ 
+    let intervall = Rc::new(RefCell::new(INITIALUPDATEINTERVALL));
     let mut inp_update_intervall = FloatInput::default().with_size(100, 20).below_of(&btn_stop_toggle, 5);
     inp_update_intervall.set_value(format!("{}",INITIALUPDATEINTERVALL).as_str());
     wind.add(&inp_update_intervall);
     let inp_update_intervallref = Rc::new(RefCell::new(inp_update_intervall));
 
-    let canvasref1 = canvasref.clone();
-    //let btn_stop_toggleref1 = btn_stop_toggleref.clone();
-    //let inp_update_intervallref2 = inp_update_intervallref.clone();
-    let intervallref2 = intervall.clone();
-    let update = move |handle| {        
-        if !*canvasref1.borrow().drawmoderef.borrow() { //TODO maybe couple to button
-            let fieldref = &canvasref1.borrow_mut().field;
-            fieldref.borrow_mut().update();
-            println!("updated field, {} alive chunk", fieldref.borrow().vec.len());
-        }
-
-        app::repeat_timeout3(*intervallref2.borrow(), handle);
-        println!("timer restarted with timeout {}", *intervallref2.borrow() );
-    };
-
-    let timeouthandle = app::add_timeout3(*intervall.borrow(), update);
-    println!("timer started fir the first time with timeout {}", *intervall.borrow() );
+    let mut timeouthandle = app::add_timeout3(core::f64::MAX, |_|()); //<- i despise this. creates dummy timer just to fill timeouthandle
 
     //TODO make better use of drawmode (maybe remove from field?)
     let canvasref0 = canvasref.clone();
     let inp_update_intervallref1 = inp_update_intervallref.clone();
     let intervallref1 = intervall.clone();
+
     btn_stop_toggle.set_callback(move |handle| {
         if handle.value() {
             remove_timeout3(timeouthandle);
+            println!("timer destroyed");
+
             *canvasref0.borrow_mut().drawmoderef.borrow_mut() = true;
             inp_update_intervallref1.borrow_mut().set_value(format!{"{}",intervallref1.borrow()}.as_str());
             inp_update_intervallref1.borrow_mut().show();
             handle.set_label("Start");
         }
         else {
-            let curintervall = *intervallref1.borrow();
-            if inp_update_intervallref1.borrow().value().parse().unwrap_or(curintervall) <= 10.0 {
-                let a = intervallref1.replace(inp_update_intervallref1.borrow().value().parse().unwrap_or(curintervall));
+            let oldintervall = *intervallref1.borrow();
+            let newintervall = inp_update_intervallref1.borrow().value().parse().unwrap_or(oldintervall);
+            if 0.0 <= newintervall && newintervall <= 10.0 {
+                let a = intervallref1.replace(newintervall);
                 
-                println!("\nreplaces timeout {} with {}\n", a, *intervallref1.borrow() );
+                println!("\nreplaced timeout {} with {}\n", a, *intervallref1.borrow() );
             }
             *canvasref0.borrow_mut().drawmoderef.borrow_mut() = false;
             inp_update_intervallref1.borrow_mut().hide();
             handle.set_label("Stop");
+            //------------------------------------
+            //let btn_stop_toggleref1 = btn_stop_toggleref.clone();
+            //let inp_update_intervallref2 = inp_update_intervallref.clone();
+            let canvasref1 = canvasref0.clone();
+            let intervallref2 = intervallref1.clone();
+            let update = move |handle| {        
+                if !*canvasref1.borrow().drawmoderef.borrow() { //TODO maybe couple to button
+                    let fieldref = &canvasref1.borrow_mut().field;
+                    fieldref.borrow_mut().update();
+                    println!("updated field, {} alive chunk", fieldref.borrow().vec.len());
+                }
+
+            app::repeat_timeout3(*intervallref2.borrow(), handle);
+            println!("timer restarted with timeout {}", *intervallref2.borrow());
+            };
+        
+            timeouthandle = app::add_timeout3(*intervall.borrow(), update);
+            println!("timer started for the first time with timeout {}", *intervall.borrow() );
+        
+            //------------------------------------
         }
     }); //TODO perhaps add btn to canvas-type
     wind.add(&btn_stop_toggle);
