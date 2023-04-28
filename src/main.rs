@@ -1,6 +1,6 @@
 const DIM:usize = 32;
 
-use std::{rc::Rc, default};
+use std::{rc::Rc};
 
 // pub trait Neighbor {
 //     fn neighbor_east() -> Self;
@@ -238,12 +238,7 @@ impl CellsGettable for Square {
 
 impl FullSquare {
     fn new () -> Self { //initializes a FullSquare with all cells dead
-        let mut cells:[[bool;DIM];DIM] = Default::default(); //TODO use something better
-        for i in 0..DIM {
-            for j in 0..DIM {
-                cells[i][j] = false;
-            }
-        }
+        let cells:[[bool;DIM];DIM] = [[false;DIM];DIM];
         Self{cell:cells,alive_cells:0}
     }
     fn get_cell(&self,x:usize,y:usize) -> bool {
@@ -278,7 +273,7 @@ impl Field {
         }
     }
     
-    fn set_cell(&mut self, coords:(isize,isize), val:bool) { //TODO there is some mistake here
+    fn set_cell(&mut self, coords:(isize,isize), val:bool) {
         let localcoords = (coords.0.rem_euclid(DIM as isize),coords.1.rem_euclid(DIM as isize));
         let squarecoords = ((coords.0-localcoords.0)/DIM as isize,(coords.1-localcoords.1)/DIM as isize);
 
@@ -441,16 +436,6 @@ fn print (f:&Field) {
 
 }
  */
-
- use fltk::{
-    app,
-    draw::{draw_line, draw_point, draw_rect_fill, set_draw_color, set_line_style, LineStyle},
-    enums::{Color, Event, FrameType},
-    frame::Frame,
-    prelude::*,
-    surface::ImageSurface,
-    window::Window, button::ToggleButton
-};
 use std::cell::RefCell;
 struct Canvas {
     frame: Frame,
@@ -459,13 +444,13 @@ struct Canvas {
     xoffsetref:Rc<RefCell<i32>>,
     yoffsetref:Rc<RefCell<i32>>,
     linedistref:Rc<RefCell<i32>>,
-    draw_mode:bool
+    drawmoderef:Rc<RefCell<bool>>
 }
 
 impl Canvas {
     pub fn new(w: i32, h: i32, field: Rc<RefCell<Field>>,xoffset:i32,yoffset:i32, linedist:i32) -> Self {
         let mut frame = Frame::default().with_size(w, h).center_of_parent();
-        let draw_mode = true;        
+        let drawmoderef = Rc::new(RefCell::new(true));
         
         frame.set_color(Color::White);
         frame.set_frame(FrameType::DownBox);
@@ -497,6 +482,7 @@ impl Canvas {
             let xoffsetref = xoffsetref.clone();
             let yoffsetref = yoffsetref.clone();
             let linedistref = linedistref.clone();
+            let drawmoderef = drawmoderef.clone();
 
             move |f, ev| {
                 let mut surf = surf.borrow(); //why not just borrow()?
@@ -509,12 +495,11 @@ impl Canvas {
 
                         println!("{}+{}",coords.0,*xoffsetref.borrow());
                         println!("{}+{}",coords.1,*yoffsetref.borrow());
-                        println!();
 
                         x = coords.0;
                         y = coords.1;
 
-                        if draw_mode && app::event_mouse_button() == app::MouseButton::Left {
+                        if *drawmoderef.borrow() && app::event_mouse_button() == app::MouseButton::Right {
                             let xoffset = *xoffsetref.borrow();
                             let yoffset = *yoffsetref.borrow();
                             let linedist = *linedistref.borrow();
@@ -524,6 +509,8 @@ impl Canvas {
 
                             let coords = (((coords.0+xoffset-xmod)/linedist) as isize,((coords.1+yoffset-ymod)/linedist) as isize);
                             let curval = field.get_cell(coords.0, coords.1);
+
+                            //println!("{},{}",coords.0, coords.1);
                             field.set_cell(coords, !curval);
                         }
                         true
@@ -571,7 +558,7 @@ impl Canvas {
                 }
             }
         });
-        Self { frame, surf , field, xoffsetref, yoffsetref, linedistref, draw_mode}
+        Self { frame, surf , field, xoffsetref, yoffsetref, linedistref, drawmoderef}
     }
 
     fn redraw_canvas_no_ref(frame:&mut Frame, surf:&mut ImageSurface, field:&mut Field, xoffset:i32, yoffset:i32, linedist:i32) {
@@ -610,11 +597,22 @@ const WIDTH: i32 = 800;
 const HEIGHT: i32 = 600;
 const TICKTIME: f64 = 0.05; 
 const LINEDIST: i32 = 30;
-const UPDATEINTERVALL: f64 = 0.1; 
+const INITIALUPDATEINTERVALL: f64 = 0.1; 
 const XSTARTOFFSET: i32 = 0;
 const YSTARTOFFSET: i32 = 0;
 
 fltk::widget_extends!(Canvas, Frame, frame);
+
+use fltk::app::remove_timeout3;
+use fltk::{
+    app,
+    draw::{draw_line, draw_point, draw_rect_fill, set_draw_color, set_line_style, LineStyle},
+    enums::{Color, Event, FrameType},
+    frame::Frame,
+    prelude::*,
+    surface::ImageSurface,
+    window::Window, button::ToggleButton, text::TextDisplay, input::FloatInput
+};
 
 fn main() {
     //-----------------------------------------------------------------------------------------
@@ -666,41 +664,91 @@ fn main() {
     let f = RefCell::new(field);
     let canvas = Canvas::new(WIDTH, HEIGHT, f.into(), XSTARTOFFSET, YSTARTOFFSET, LINEDIST);
     wind.add(&canvas.frame);
+    let canvasref = Rc::new(RefCell::new(canvas));
 
     let mut btn_stop_toggle = ToggleButton::default().with_label("Stop").with_size(100, 40).with_pos(WIDTH-100,0);
-    
+    btn_stop_toggle.set_value(true);
+    btn_stop_toggle.set_shortcut(fltk::enums::Shortcut::from_char(' ')); 
+
+    let mut intervall = Rc::new(RefCell::new(INITIALUPDATEINTERVALL));
+    let mut inp_update_intervall = FloatInput::default().with_size(100, 20).below_of(&btn_stop_toggle, 5);
+    inp_update_intervall.set_value(format!("{}",INITIALUPDATEINTERVALL).as_str());
+    wind.add(&inp_update_intervall);
+    let inp_update_intervallref = Rc::new(RefCell::new(inp_update_intervall));
+
+    let canvasref1 = canvasref.clone();
+    //let btn_stop_toggleref1 = btn_stop_toggleref.clone();
+    //let inp_update_intervallref2 = inp_update_intervallref.clone();
+    let intervallref2 = intervall.clone();
+    let update = move |handle| {        
+        if !*canvasref1.borrow().drawmoderef.borrow() { //TODO maybe couple to button
+            let fieldref = &canvasref1.borrow_mut().field;
+            fieldref.borrow_mut().update();
+            println!("updated field, {} alive chunk", fieldref.borrow().vec.len());
+        }
+
+        app::repeat_timeout3(*intervallref2.borrow(), handle);
+        println!("timer restarted with timeout {}", *intervallref2.borrow() );
+    };
+
+    let timeouthandle = app::add_timeout3(*intervall.borrow(), update);
+    println!("timer started fir the first time with timeout {}", *intervall.borrow() );
+
+    //TODO make better use of drawmode (maybe remove from field?)
+    let canvasref0 = canvasref.clone();
+    let inp_update_intervallref1 = inp_update_intervallref.clone();
+    let intervallref1 = intervall.clone();
     btn_stop_toggle.set_callback(move |handle| {
         if handle.value() {
+            remove_timeout3(timeouthandle);
+            *canvasref0.borrow_mut().drawmoderef.borrow_mut() = true;
+            inp_update_intervallref1.borrow_mut().set_value(format!{"{}",intervallref1.borrow()}.as_str());
+            inp_update_intervallref1.borrow_mut().show();
             handle.set_label("Start");
         }
         else {
+            let curintervall = *intervallref1.borrow();
+            if inp_update_intervallref1.borrow().value().parse().unwrap_or(curintervall) <= 10.0 {
+                let a = intervallref1.replace(inp_update_intervallref1.borrow().value().parse().unwrap_or(curintervall));
+                
+                println!("\nreplaces timeout {} with {}\n", a, *intervallref1.borrow() );
+            }
+            *canvasref0.borrow_mut().drawmoderef.borrow_mut() = false;
+            inp_update_intervallref1.borrow_mut().hide();
             handle.set_label("Stop");
         }
     }); //TODO perhaps add btn to canvas-type
     wind.add(&btn_stop_toggle);
     let btn_stop_toggleref = Rc::new(RefCell::new(btn_stop_toggle));
 
+    let mut lbl_coords = TextDisplay::new(0,HEIGHT,100,0,"");
+    lbl_coords.set_frame(FrameType::NoBox); //<- i hate this
+    wind.add(&lbl_coords);
+
     //wind.end();
     wind.show();
     
-    let fieldref = canvas.field.clone();
-    let btn_stop_toggleref1 = btn_stop_toggleref.clone();
-    let update = move |handle| {
-        if !btn_stop_toggleref1.borrow_mut().value() {
-            fieldref.borrow_mut().update();
-            println!("updated field, {} alive chunk", fieldref.borrow().vec.len());
-        }
-        app::repeat_timeout3(UPDATEINTERVALL, handle);
-    };
-
-    app::add_timeout3(UPDATEINTERVALL, update);
-    
-    let canvasref = Rc::new(RefCell::new(canvas));
+    let canvasref2 = canvasref.clone();
     let btn_stop_toggleref2 = btn_stop_toggleref.clone();
     let tick = move |handle| {
-        canvasref.borrow_mut().redraw_canvas();
+
+        let xoffset = *canvasref2.borrow().xoffsetref.borrow();
+        let yoffset = *canvasref2.borrow().yoffsetref.borrow();
+        let linedist = *canvasref2.borrow().linedistref.borrow();
+
+        //TODO find better way to redraw stuff
+        canvasref2.borrow_mut().redraw_canvas();
         btn_stop_toggleref2.borrow_mut().redraw();
+        lbl_coords.redraw();
         //println!("updated canvas");
+
+        let xmod = (app::event_x()+xoffset).rem_euclid(linedist);
+        let ymod = (app::event_y()+yoffset).rem_euclid(linedist);
+
+        let curcellmousepos = (((app::event_x()+xoffset-xmod)/linedist),((app::event_y()+yoffset-ymod)/linedist));
+
+        lbl_coords.set_label(format!("X: {} Y: {}", curcellmousepos.0, curcellmousepos.1).as_str());
+
         app::repeat_timeout3(TICKTIME, handle);
     };
 
