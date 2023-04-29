@@ -1,5 +1,9 @@
-const DIM:usize = 8;
+const DIM:usize = 16;
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::collections::hash_map::{Keys, IntoKeys};
+use std::thread::Thread;
 use std::vec;
 use std::{rc::Rc};
 
@@ -7,11 +11,11 @@ pub trait CellsGettable {
     fn get_cell(&self,x:usize,y:usize) -> bool;
 }
 #[derive(Clone)]
-struct ThinSquareLine {
+struct ThinSquareLine { //probably best to just remove
     cell: [bool;DIM]
 }
 #[derive(Clone)]
-struct ThinSquareCorner {
+struct ThinSquareCorner { //TODO probably best to just remove
     leftline:[bool;DIM],
     rightline:[bool;DIM-1]
 }
@@ -351,34 +355,76 @@ impl Field {
     }
 
     fn update (&mut self) {
-        let mut hs:std::collections::HashMap<(isize,isize),Square> = std::collections::HashMap::new();
+        let allkeys = self.vec.clone().into_keys();
+        self.vec = self.update_keys(allkeys);
+    }
 
-        let keys;
-        let binding = self.vec.clone();
-        keys = binding.keys(); 
+    fn update_keys<T:IntoIterator<Item = (isize,isize)>> (&self, keys:T) -> std::collections::HashMap<(isize,isize),Square> {
+        let mut hs = std::collections::HashMap::new();
 
         for (x,y) in keys {
-
-            let newchunk = self.update_chunk((*x,*y));
-            Self::insert_valid_only((*x,*y),newchunk,&mut hs);
+            let newchunk = self.update_chunk((x,y));
+            Self::insert_valid_only((x,y),newchunk,&mut hs);
 
             for dir in Direction::iter() {
-                let coords = Direction::shift((*x,*y), dir);
+                let coords = Direction::shift((x,y), dir);
                 let newchunk = self.update_chunk(coords);
                 Self::insert_valid_only(coords,newchunk,&mut hs);
             }
-
-            self.vec.remove_entry(&(*x,*y));
+            //The following is not possible anymore when using parallel code
+            /*
+            self.vec.remove_entry(&(x,y));
 
             for dir in Direction::iter() {
-                let coords = Direction::shift((*x,*y), dir);
+                let coords = Direction::shift((x,y), dir);
                 let cursquare = self.vec.get(&coords);
                 if let Some(Square::Full(square)) = cursquare {
                     self.vec.insert(coords,square.getBoundary(dir));
                 }
             }
+            */
         }
-        self.vec = hs;
+        hs
+    }
+    fn update_threaded (&mut self) {
+        let allkeys = self.vec.clone().into_keys();
+        
+        let threadnum = std::cmp::max(allkeys.size_hint().0/10,1);
+        println!("At least {} chunks, hence {} thread(s) to spawn", allkeys.size_hint().0, std::cmp::max(allkeys.size_hint().0/10,1));
+
+        let mut splitkeysvec = vec![Vec::new();threadnum];
+        for (i,x) in allkeys.enumerate() {
+            splitkeysvec.get_mut(i%threadnum).unwrap().push(x);
+        }
+
+        let mut handlevec = Vec::new();
+        
+        for x in splitkeysvec {
+            let test = self.clone(); //expensive
+            handlevec.push(std::thread::spawn(move || { //TODO this is duplicate code, perhaps make own function and compute chunks relevant for computation first
+                let mut hs:HashMap<(isize,isize),Square> = std::collections::HashMap::new();
+                
+                for (x,y) in x {
+                    let newchunk = test.update_chunk((x,y));
+                    Self::insert_valid_only((x,y),newchunk,&mut hs);
+        
+                    for dir in Direction::iter() {
+                        let coords = Direction::shift((x,y), dir);
+                        let newchunk = test.update_chunk(coords);
+                        Self::insert_valid_only(coords,newchunk,&mut hs);
+                    }
+                }
+                
+                hs
+            }))
+        }
+
+        let res = handlevec.into_iter().map(|x| x.join().unwrap());
+        self.vec.clear();
+        for x in res {
+            self.vec.extend(x);
+        }
+        
     }
 }
 
@@ -604,12 +650,6 @@ use fltk::{
     window::Window, button::ToggleButton, text::TextDisplay, input::FloatInput, button::Button
 };
 
-//helper function for mirroring vecs
-fn map<T> (vec:&mut Vec<T>, f:fn(&mut T)) {
-    for i in vec {
-        f(i);
-    }
-}
 //helper function for rotating double vecs
 fn rot<T:Copy> (vec:&Vec<Vec<T>>) -> Vec<Vec<T>> {
     let mut res = Vec::new();
@@ -686,9 +726,7 @@ fn main() {
             let oldintervall = *intervallref1.borrow();
             let newintervall = inp_update_intervallref1.borrow().value().parse().unwrap_or(oldintervall);
             if 0.0 <= newintervall && newintervall <= 10.0 {
-                let a = intervallref1.replace(newintervall);
-                
-                //println!("\nreplaced timeout {} with {}\n", a, *intervallref1.borrow() );
+                intervallref1.replace(newintervall);
             }
             *canvasref0.borrow_mut().drawmoderef.borrow_mut() = false;
             inp_update_intervallref1.borrow_mut().hide();
@@ -700,17 +738,15 @@ fn main() {
             let canvasref1 = canvasref0.clone();
             let intervallref2 = intervallref1.clone();
 
-            let mut start = std::time::Instant::now();
             let update = move |handle| {        
-
+                let start = std::time::Instant::now();
                 let fieldref = &canvasref1.borrow_mut().field;
-                fieldref.borrow_mut().update();
+                fieldref.borrow_mut().update_threaded();
 
                 let secs = start.elapsed().as_secs_f64();
                 println!("elapsed time is {} s, setting timout {} s\n{} alive chunks", secs,*intervallref2.borrow()-secs,fieldref.borrow().vec.len());
 
                 app::repeat_timeout3(*intervallref2.borrow()-start.elapsed().as_secs_f64(), handle);
-                start = std::time::Instant::now();
             };
         
             timeouthandle = app::add_timeout3(*intervall.borrow(), update);
@@ -733,8 +769,8 @@ fn main() {
     let btn_stop_toggleref2 = btn_stop_toggleref.clone();
     let btn_stepref2 = btn_stepref.clone();
 
+    let mut starttime = std::time::Instant::now();
     let tick = move |handle| {
-        let starttime = std::time::Instant::now();
         let xoffset = *canvasref2.borrow().xoffsetref.borrow();
         let yoffset = *canvasref2.borrow().yoffsetref.borrow();
         let linedist = *canvasref2.borrow().linedistref.borrow();
@@ -754,6 +790,7 @@ fn main() {
         lbl_coords.set_label(format!("X: {} Y: {}", curcellmousepos.0, curcellmousepos.1).as_str());
 
         app::repeat_timeout3(TICKTIME-starttime.elapsed().as_secs_f64(), handle);
+        starttime = std::time::Instant::now();
     };
 
     app::add_timeout3(TICKTIME, tick);
