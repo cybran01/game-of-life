@@ -1,4 +1,4 @@
-const DIM:usize = 16;
+const DIM:usize = 8;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,30 +11,9 @@ pub trait CellsGettable {
     fn get_cell(&self,x:usize,y:usize) -> bool;
 }
 #[derive(Clone)]
-struct ThinSquareLine { //probably best to just remove
-    cell: [bool;DIM]
-}
-#[derive(Clone)]
-struct ThinSquareCorner { //TODO probably best to just remove
-    leftline:[bool;DIM],
-    rightline:[bool;DIM-1]
-}
-#[derive(Clone)]
-struct FullSquare {
+struct Square {
     cell: [[bool;DIM];DIM],
     alive_cells: i32
-}
-#[derive(Clone)]
-enum Square {
-    Full(FullSquare),
-    NorthBoundary(ThinSquareLine),
-    SouthBoundary(ThinSquareLine),
-    WestBoundary(ThinSquareLine),
-    EastBoundary(ThinSquareLine),
-    NorthWestBoundary(ThinSquareCorner),
-    NorthEastBoundary(ThinSquareCorner),
-    SouthWestBoundary(ThinSquareCorner),
-    SouthEastBoundary(ThinSquareCorner)
 }
 #[derive(Clone)]
 struct Field {
@@ -71,164 +50,15 @@ impl Direction {
     }
 }
 
-impl FullSquare {
-    fn getBoundary(&self, dir:&Direction) -> Square {
-        match dir {
-            Direction::North => FullSquare::getNorthBoundary(self),
-            Direction::South => FullSquare::getSouthBoundary(self),
-            Direction::West => FullSquare::getWestBoundary(self),
-            Direction::East => FullSquare::getEastBoundary(self),
-            Direction::NorthWest => FullSquare::getNorthWestBoundary(self),
-            Direction::NorthEast => FullSquare::getNorthEastBoundary(self),
-            Direction::SouthWest => FullSquare::getSouthWestBoundary(self),
-            Direction::SouthEast => FullSquare::getSouthEastBoundary(self)
-        }
-    }
-    fn getNorthBoundary(&self) -> Square {
-        let mut cell:[bool;DIM] = Default::default();
-        for x in 0..DIM {
-            cell[x]=self.cell[x][DIM-1];
-        }
-        Square::NorthBoundary(ThinSquareLine{cell:cell})
-    }
-    fn getSouthBoundary(&self) -> Square {
-        let mut cell:[bool;DIM] = Default::default();
-        for x in 0..DIM {
-            cell[x]=self.cell[x][0];
-        }
-        Square::SouthBoundary(ThinSquareLine{cell:cell})
-    }
-    fn getWestBoundary(&self) -> Square {
-        Square::WestBoundary(ThinSquareLine{cell:self.cell[0]})
-    }
-    fn getEastBoundary(&self) -> Square {
-        Square::EastBoundary(ThinSquareLine{cell:self.cell[DIM-1]})
-    }
-    fn getNorthWestBoundary(&self) -> Square {
-        let westcells:[bool;DIM] = self.cell[0];
-        let mut northcells:[bool;DIM-1] = Default::default();
-        for x in 1..DIM {
-            northcells[x-1]=self.cell[x][DIM-1];
-        }
-        Square::NorthWestBoundary(ThinSquareCorner{leftline:westcells,rightline:northcells})
-    }
-    fn getNorthEastBoundary(&self) -> Square {
-        let mut northcells:[bool;DIM] = Default::default();
-        for x in 0..DIM {
-            northcells[x]=self.cell[x][DIM-1];
-        }
-        let eastcells:[bool;DIM-1] = self.cell[DIM-1][0..DIM-1].try_into().unwrap();
-        Square::NorthEastBoundary(ThinSquareCorner{leftline:northcells,rightline:eastcells})
-        
-    }
-    fn getSouthWestBoundary(&self) -> Square {
-        let mut southcells:[bool;DIM] = Default::default();
-        for x in 0..DIM {
-            southcells[x]=self.cell[x][0];
-        }
-        let westcells:[bool;DIM-1] = self.cell[0][1..DIM].try_into().unwrap();
-        Square::SouthWestBoundary(ThinSquareCorner{leftline:southcells,rightline:westcells})
-    }
-    fn getSouthEastBoundary(&self) -> Square {
-        let eastcells:[bool;DIM] = self.cell[DIM-1];
-        let mut southcells:[bool;DIM-1] = Default::default();
-        for x in 0..DIM-1 {
-            southcells[x]=self.cell[x][0];
-        }
-        Square::SouthEastBoundary(ThinSquareCorner{leftline:eastcells,rightline:southcells})
-    }
-}
-
 impl CellsGettable for Square {
     fn get_cell(&self,x:usize,y:usize) -> bool {
         assert!((0..DIM).contains(&x));
         assert!((0..DIM).contains(&y));
-
-        match self {
-            Square::Full(square) => {
-                square.cell[x][y]
-            },
-            Square::NorthBoundary(square) => {
-                if y == DIM-1 {
-                    square.cell[x]
-                }
-                else {
-                    false
-                }
-            },
-            Square::SouthBoundary(square) => {
-                if y == 0 {
-                    square.cell[x]
-                }
-                else {
-                    false
-                }
-            },
-            Square::WestBoundary(square) => {
-                if x == 0 {
-                    square.cell[y]
-                }
-                else {
-                    false
-                }
-            },
-            Square::EastBoundary(square) => {
-                if x == DIM-1 {
-                    square.cell[y]
-                }
-                else {
-                    false
-                }
-            },
-            Square::NorthWestBoundary(square) => {
-                if x == 0 {
-                    square.leftline[y]
-                }
-                else if y == DIM-1 {
-                    square.rightline[x-1]
-                }
-                else {
-                    false
-                }
-            },
-            Square::NorthEastBoundary(square) => {
-                if y == DIM-1 {
-                    square.leftline[x]
-                }
-                else if x == DIM-1 {
-                    square.rightline[y]
-                }
-                else {
-                    false
-                }
-            },
-            Square::SouthWestBoundary(square) => {
-                if y == 0 {
-                    square.leftline[x]
-                }
-                else if x == 0 {
-                    square.rightline[y-1]
-                }
-                else {
-                    false
-                }
-            },
-            Square::SouthEastBoundary(square) => {
-                if x == DIM-1 {
-                    square.leftline[y]
-                }
-                else if y == 0 {
-                    square.rightline[x]
-                }
-                else {
-                    false
-                }
-            }
-        }
+        self.cell[x][y]
     }
 }
 
-impl FullSquare {
+impl Square {
     fn new () -> Self { //initializes a FullSquare with all cells dead
         let cells:[[bool;DIM];DIM] = [[false;DIM];DIM];
         Self{cell:cells,alive_cells:0}
@@ -274,14 +104,13 @@ impl Field {
         let squarecoords = ((coords.0-localcoords.0)/DIM as isize,(coords.1-localcoords.1)/DIM as isize);
 
         match self.vec.get_mut(&squarecoords) {
-            Some(Square::Full(cursquare)) => cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, val),
+            Some(cursquare) => cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, val),
             None => {
                 if val {
-                    let mut cursquare = FullSquare::new();
+                    let mut cursquare = Square::new();
                     cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, true);
-                    self.vec.insert(squarecoords, Square::Full(cursquare));
-                }},
-            _ => panic!()
+                    self.vec.insert(squarecoords, cursquare);
+                }}
         }
     }
 
@@ -306,19 +135,15 @@ impl Field {
     }
 
     fn update_chunk(&self, coords:(isize,isize)) -> Option<Square> {
-        
         let cursquare = self.vec.get(&coords);
         let mut square;
         let mut checkonlyboundary = false;
 
         match cursquare {
-            Some(Square::Full(squareref)) => square = squareref.clone(),
+            Some(squareref) => square = squareref.clone(),
             None => {
-                square = FullSquare{cell:[[false;DIM];DIM],alive_cells:0};
+                square = Square{cell:[[false;DIM];DIM],alive_cells:0};
                 checkonlyboundary = true;
-            },
-            Some (_) => {
-                return None;
             }
         }
         for x in 0..DIM {
@@ -342,12 +167,12 @@ impl Field {
             return None;
         }
         else {
-            return Some(Square::Full(square));
+            return Some(square);
         }
     }
 
-    fn insert_valid_only(key:(isize,isize), elem:Option<Square>, hs:&mut std::collections::HashMap<(isize,isize),Square>) {
-        if let Some(Square::Full(_)) = elem {
+    fn insert_valid_only(key:(isize,isize), elem:Option<Square>, hs:&mut std::collections::HashMap<(isize,isize),Square>) { //TODO check if try_insert is finally out of nightly
+        if let Some(_) = elem {
                 if !hs.contains_key(&key) {
                     hs.insert(key, elem.unwrap());
                 }
@@ -693,7 +518,9 @@ fn main() {
     let mut btn_step = Button::default().with_label("Step").with_size(40, 40).left_of(&btn_stop_toggle, 5);
     let canvasref3 = canvasref.clone();
     btn_step.set_callback(move |_| {
+        let start = std::time::Instant::now();
         canvasref3.borrow_mut().field.borrow_mut().update();
+        println!("Step took {} ms",start.elapsed().as_millis());
     });
     wind.add(&btn_step);
     let btn_stepref = Rc::new(RefCell::new(btn_step));
