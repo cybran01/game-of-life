@@ -1,19 +1,7 @@
-const DIM:usize = 32;
+const DIM:usize = 8;
 
+use std::vec;
 use std::{rc::Rc};
-
-// pub trait Neighbor {
-//     fn neighbor_east() -> Self;
-//     fn neighbor_west() -> Self;
-//     fn neighbor_north() -> Self;
-//     fn neighbor_east() -> Self;
-//     fn neighbor_east() -> Self;
-//     fn neighbor_east() -> Self;
-//     fn neighbor_east() -> Self;
-//     fn neighbor_east() -> Self;
-// }
-
-//TODO allow certain square shapes that are simpler and have less cells such that they can be stored more efficiently after the update method is called
 
 pub trait CellsGettable {
     fn get_cell(&self,x:usize,y:usize) -> bool;
@@ -261,6 +249,10 @@ impl FullSquare {
     }
 }
 impl Field {
+    fn new () -> Self {
+        let vec = std::collections::HashMap::new();
+        Self {vec}
+    }
     fn get_cell(&self,x:isize,y:isize) -> bool {
         let dim = isize::try_from(DIM).unwrap();
 
@@ -279,10 +271,21 @@ impl Field {
 
         match self.vec.get_mut(&squarecoords) {
             Some(Square::Full(cursquare)) => cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, val),
-            None => {let mut cursquare = FullSquare::new();
-                cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, true);
-                self.vec.insert(squarecoords, Square::Full(cursquare));},
+            None => {
+                if val {
+                    let mut cursquare = FullSquare::new();
+                    cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, true);
+                    self.vec.insert(squarecoords, Square::Full(cursquare));
+                }},
             _ => panic!()
+        }
+    }
+
+    fn set_shape_at(&mut self, coords:(isize,isize), shape:Vec<Vec<bool>>) { //takes vector of columns
+        for x in 0..shape.len() {
+            for y in 0..shape[x].len() {
+                self.set_cell((coords.0+x as isize,coords.1+y as isize), shape[x][y]);
+            }
         }
     }
 
@@ -390,52 +393,6 @@ fn print (f:&Field) {
     }
 }
 
-/* fn main() {
-     let glider = [[false,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [true,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false]];
-    let start = Square::Full(FullSquare {cell:glider,alive_cells:5});
-    let mut hashmap = std::collections::HashMap::new();
-    hashmap.insert((0,0), start);
-    let mut f = Field{vec:hashmap};
-
-    for _i in  0..121 {
-        print(&f);
-        println!();
-        f.update(); 
-    } 
-
-}
- */
 use std::cell::RefCell;
 struct Canvas {
     frame: Frame,
@@ -475,8 +432,9 @@ impl Canvas {
         });
 
         frame.handle({
-            let mut x = 0;
-            let mut y = 0;
+            let mut lastclickedcoords = (0,0);
+            let mut lastsetfieldcoords = (0,0);
+
             let surf = surf.clone();
             let field = field.clone();
             let xoffsetref = xoffsetref.clone();
@@ -485,19 +443,18 @@ impl Canvas {
             let drawmoderef = drawmoderef.clone();
 
             move |f, ev| {
-                let mut surf = surf.borrow(); //why not just borrow()?
-                let mut field = field.borrow_mut(); //why not just borrow()?
+                let mut surf = surf.borrow();
+                let mut field = field.borrow_mut(); 
 
                 match ev {
-                    Event::Push => {
-                        println!("Push");
+                    Event::Push => { //TODO the first part is probably only necessary when left clicked
+                        //println!("Push");
                         let coords = app::event_coords();
 
-                        println!("{}+{}",coords.0,*xoffsetref.borrow());
-                        println!("{}+{}",coords.1,*yoffsetref.borrow());
+                        //println!("{}+{}",coords.0,*xoffsetref.borrow());
+                        //println!("{}+{}",coords.1,*yoffsetref.borrow());
 
-                        x = coords.0;
-                        y = coords.1;
+                        lastclickedcoords = coords;
 
                         if *drawmoderef.borrow() && app::event_mouse_button() == app::MouseButton::Right {
                             let xoffset = *xoffsetref.borrow();
@@ -507,31 +464,63 @@ impl Canvas {
                             let xmod = (coords.0+xoffset).rem_euclid(linedist);
                             let ymod = (coords.1+yoffset).rem_euclid(linedist);
 
-                            let coords = (((coords.0+xoffset-xmod)/linedist) as isize,((coords.1+yoffset-ymod)/linedist) as isize);
-                            let curval = field.get_cell(coords.0, coords.1);
+                            let fieldcoords = (((coords.0+xoffset-xmod)/linedist) as isize,((coords.1+yoffset-ymod)/linedist) as isize);
+                            let curval = field.get_cell(fieldcoords.0, fieldcoords.1);
 
-                            //println!("{},{}",coords.0, coords.1);
-                            field.set_cell(coords, !curval);
+                            field.set_cell(fieldcoords, !curval);
+                            lastsetfieldcoords = fieldcoords;
                         }
                         true
                     }
                     Event::Drag => {
-                        println!("Drag");
-                        let coords = app::event_coords();
+                        if app::event_mouse_button() == MouseButton::Left {
+                            //println!("Drag left");
 
-                        let newxoffset = *xoffsetref.borrow()-(coords.0-x);
-                        let newyoffset = *yoffsetref.borrow()-(coords.1-y);
+                            let coords = app::event_coords();
 
-                        xoffsetref.replace(newxoffset);
-                        yoffsetref.replace(newyoffset);
-                        //f.redraw();
+                            let newxoffset = *xoffsetref.borrow()-(coords.0-lastclickedcoords.0);
+                            let newyoffset = *yoffsetref.borrow()-(coords.1-lastclickedcoords.1);
+    
+                            xoffsetref.replace(newxoffset);
+                            yoffsetref.replace(newyoffset);
+    
+                            lastclickedcoords = coords;
+                            true
+                        }
+                        else if app::event_mouse_button() == MouseButton::Right { 
+                            //println!("Drag right");
 
-                        x = coords.0;
-                        y = coords.1;
-                        true
+                            let coords = app::event_coords();
+      
+                            //lastclickedcoords = coords; //probably not necessary 
+
+                            //println!("{}+{}",coords.0,*xoffsetref.borrow());
+                            //println!("{}+{}",coords.1,*yoffsetref.borrow());
+
+                            if *drawmoderef.borrow() && app::event_mouse_button() == app::MouseButton::Right {
+                                let xoffset = *xoffsetref.borrow();
+                                let yoffset = *yoffsetref.borrow();
+                                let linedist = *linedistref.borrow();
+
+                                let xmod = (coords.0+xoffset).rem_euclid(linedist);
+                                let ymod = (coords.1+yoffset).rem_euclid(linedist);
+
+                                let fieldcoords = (((coords.0+xoffset-xmod)/linedist) as isize,((coords.1+yoffset-ymod)/linedist) as isize);
+                                let curval = field.get_cell(fieldcoords.0, fieldcoords.1);
+
+                                if fieldcoords != lastsetfieldcoords {
+                                    field.set_cell(fieldcoords, !curval);
+                                    lastsetfieldcoords = fieldcoords;
+                                }
+                            }
+                            true
+                        }
+                        else {
+                            false
+                        }           
                     }
                     Event::MouseWheel => { 
-                        println!("MouseWheel");
+                        //println!("MouseWheel");
                         let coords: (i32, i32) = app::event_coords();
 
                         let xoffset = *xoffsetref.borrow();
@@ -571,12 +560,12 @@ impl Canvas {
         set_draw_color(Color::Black);
 
         for xcoord in (linedist-xmod..=WIDTH).step_by(linedist as usize) {
-            draw_line(xcoord, 0, xcoord, HEIGHT);
+            fltk::draw::draw_line(xcoord, 0, xcoord, HEIGHT);
         }
         for ycoord in (linedist-ymod..=HEIGHT).step_by(linedist as usize) {
-            draw_line(0, ycoord, WIDTH, ycoord);
+            fltk::draw::draw_line(0, ycoord, WIDTH, ycoord);
         }
-        
+
         for xcoord in (-xmod..=WIDTH).step_by(linedist as usize) {
             for ycoord in (-ymod..=HEIGHT).step_by(linedist as usize) {
                 if field.get_cell(((xcoord+xoffset)/linedist) as isize, ((ycoord+yoffset)/linedist) as isize) {
@@ -584,6 +573,7 @@ impl Canvas {
                 }
             }
         }
+
         ImageSurface::pop_current();
         frame.redraw();
     }
@@ -603,8 +593,7 @@ const YSTARTOFFSET: i32 = 0;
 
 fltk::widget_extends!(Canvas, Frame, frame);
 
-use fltk::app::{remove_timeout3, TimeoutHandle, handle};
-use fltk::enums::Key;
+use fltk::app::{remove_timeout3, TimeoutHandle, handle, MouseButton};
 use fltk::{
     app,
     draw::{draw_line, draw_point, draw_rect_fill, set_draw_color, set_line_style, LineStyle},
@@ -612,48 +601,37 @@ use fltk::{
     frame::Frame,
     prelude::*,
     surface::ImageSurface,
-    window::Window, button::ToggleButton, text::TextDisplay, input::FloatInput
+    window::Window, button::ToggleButton, text::TextDisplay, input::FloatInput, button::Button
 };
+
+//helper function for mirroring vecs
+fn map<T> (vec:&mut Vec<T>, f:fn(&mut T)) {
+    for i in vec {
+        f(i);
+    }
+}
+//helper function for rotating double vecs
+fn rot<T:Copy> (vec:&Vec<Vec<T>>) -> Vec<Vec<T>> {
+    let mut res = Vec::new();
+    for i in 0..vec.len() {
+        let mut tmp = Vec::new();
+        for j in 0..vec[i].len() {
+            tmp.push(vec[j][i]);
+        }
+        res.push(tmp);
+    }
+    res
+}
 
 fn main() {
     //-----------------------------------------------------------------------------------------
-    let glider = [[false,false,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [true,false,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,true,true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false],
-                                    [false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false]];
+    let glider =vec![vec![false,true,false],
+                                         vec![false,false,true],
+                                         vec![true,true,true]];
+
+    let mut field = Field::new();
+    field.set_shape_at((0,0),rot(&glider)); 
     
-    let start = Square::Full(FullSquare {cell:glider,alive_cells:5});
-    let mut hashmap = std::collections::HashMap::new();
-    hashmap.insert((0,0), start);
-    let field = Field{vec:hashmap};
     //-----------------------------------------------------------------------------------------
 
     let app = app::App::default().with_scheme(app::Scheme::Gtk);
@@ -671,6 +649,14 @@ fn main() {
     btn_stop_toggle.set_id("ToggleBtn");
     btn_stop_toggle.set_value(true);
     btn_stop_toggle.set_shortcut(fltk::enums::Shortcut::Alt); 
+
+    let mut btn_step = Button::default().with_label("Step").with_size(40, 40).left_of(&btn_stop_toggle, 5);
+    let canvasref3 = canvasref.clone();
+    btn_step.set_callback(move |_| {
+        canvasref3.borrow_mut().field.borrow_mut().update();
+    });
+    wind.add(&btn_step);
+    let btn_stepref = Rc::new(RefCell::new(btn_step));
  
     let intervall = Rc::new(RefCell::new(INITIALUPDATEINTERVALL));
     let mut inp_update_intervall = FloatInput::default().with_size(100, 20).below_of(&btn_stop_toggle, 5);
@@ -684,15 +670,16 @@ fn main() {
     let canvasref0 = canvasref.clone();
     let inp_update_intervallref1 = inp_update_intervallref.clone();
     let intervallref1 = intervall.clone();
-
+    let btn_stepref1 = btn_stepref.clone(); 
     btn_stop_toggle.set_callback(move |handle| {
         if handle.value() {
             remove_timeout3(timeouthandle);
-            println!("timer destroyed");
+            //println!("timer destroyed");
 
             *canvasref0.borrow_mut().drawmoderef.borrow_mut() = true;
             inp_update_intervallref1.borrow_mut().set_value(format!{"{}",intervallref1.borrow()}.as_str());
             inp_update_intervallref1.borrow_mut().show();
+            btn_stepref1.borrow_mut().show();
             handle.set_label("Start");
         }
         else {
@@ -701,10 +688,11 @@ fn main() {
             if 0.0 <= newintervall && newintervall <= 10.0 {
                 let a = intervallref1.replace(newintervall);
                 
-                println!("\nreplaced timeout {} with {}\n", a, *intervallref1.borrow() );
+                //println!("\nreplaced timeout {} with {}\n", a, *intervallref1.borrow() );
             }
             *canvasref0.borrow_mut().drawmoderef.borrow_mut() = false;
             inp_update_intervallref1.borrow_mut().hide();
+            btn_stepref1.borrow_mut().hide();
             handle.set_label("Stop");
             //------------------------------------
             //let btn_stop_toggleref1 = btn_stop_toggleref.clone();
@@ -713,17 +701,19 @@ fn main() {
             let intervallref2 = intervallref1.clone();
             let update = move |handle| {        
                 if !*canvasref1.borrow().drawmoderef.borrow() { //TODO maybe couple to button
+                    let start = std::time::Instant::now();
+
                     let fieldref = &canvasref1.borrow_mut().field;
                     fieldref.borrow_mut().update();
-                    println!("updated field, {} alive chunk", fieldref.borrow().vec.len());
+                    println!("updated field in {} ms, {} alive chunks", fieldref.borrow().vec.len(), start.elapsed().as_millis());
                 }
 
             app::repeat_timeout3(*intervallref2.borrow(), handle);
-            println!("timer restarted with timeout {}", *intervallref2.borrow());
+            //println!("timer restarted with timeout {}", *intervallref2.borrow());
             };
         
             timeouthandle = app::add_timeout3(*intervall.borrow(), update);
-            println!("timer started for the first time with timeout {}", *intervall.borrow() );
+            //println!("timer started for the first time with timeout {}", *intervall.borrow() );
         
             //------------------------------------
         }
@@ -740,18 +730,21 @@ fn main() {
     
     let canvasref2 = canvasref.clone();
     let btn_stop_toggleref2 = btn_stop_toggleref.clone();
-    let tick = move |handle| {
+    let btn_stepref2 = btn_stepref.clone();
 
+    let tick = move |handle| {
+        let start = std::time::Instant::now();
         let xoffset = *canvasref2.borrow().xoffsetref.borrow();
         let yoffset = *canvasref2.borrow().yoffsetref.borrow();
         let linedist = *canvasref2.borrow().linedistref.borrow();
 
-        //TODO find better way to redraw stuff
+        //TODO find better way to redraw stuff, use damage values to determine what needs to be redrawn
         canvasref2.borrow_mut().redraw_canvas();
         btn_stop_toggleref2.borrow_mut().redraw();
-        lbl_coords.redraw();
+        btn_stepref2.borrow_mut().redraw();
         //println!("updated canvas");
-
+        println!("redrew canvas in {} ms", start.elapsed().as_millis());
+        
         let xmod = (app::event_x()+xoffset).rem_euclid(linedist);
         let ymod = (app::event_y()+yoffset).rem_euclid(linedist);
 
