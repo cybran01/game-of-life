@@ -699,17 +699,18 @@ fn main() {
             //let inp_update_intervallref2 = inp_update_intervallref.clone();
             let canvasref1 = canvasref0.clone();
             let intervallref2 = intervallref1.clone();
+
+            let mut start = std::time::Instant::now();
             let update = move |handle| {        
-                if !*canvasref1.borrow().drawmoderef.borrow() { //TODO maybe couple to button
-                    let start = std::time::Instant::now();
 
-                    let fieldref = &canvasref1.borrow_mut().field;
-                    fieldref.borrow_mut().update();
-                    println!("updated field in {} ms, {} alive chunks", fieldref.borrow().vec.len(), start.elapsed().as_millis());
-                }
+                let fieldref = &canvasref1.borrow_mut().field;
+                fieldref.borrow_mut().update();
 
-            app::repeat_timeout3(*intervallref2.borrow(), handle);
-            //println!("timer restarted with timeout {}", *intervallref2.borrow());
+                let secs = start.elapsed().as_secs_f64();
+                println!("elapsed time is {} s, setting timout {} s\n{} alive chunks", secs,*intervallref2.borrow()-secs,fieldref.borrow().vec.len());
+
+                app::repeat_timeout3(*intervallref2.borrow()-start.elapsed().as_secs_f64(), handle);
+                start = std::time::Instant::now();
             };
         
             timeouthandle = app::add_timeout3(*intervall.borrow(), update);
@@ -733,7 +734,7 @@ fn main() {
     let btn_stepref2 = btn_stepref.clone();
 
     let tick = move |handle| {
-        let start = std::time::Instant::now();
+        let starttime = std::time::Instant::now();
         let xoffset = *canvasref2.borrow().xoffsetref.borrow();
         let yoffset = *canvasref2.borrow().yoffsetref.borrow();
         let linedist = *canvasref2.borrow().linedistref.borrow();
@@ -743,8 +744,8 @@ fn main() {
         btn_stop_toggleref2.borrow_mut().redraw();
         btn_stepref2.borrow_mut().redraw();
         //println!("updated canvas");
-        println!("redrew canvas in {} ms", start.elapsed().as_millis());
-        
+        //println!("redrew canvas in {} ms", start.elapsed().as_millis());
+
         let xmod = (app::event_x()+xoffset).rem_euclid(linedist);
         let ymod = (app::event_y()+yoffset).rem_euclid(linedist);
 
@@ -752,7 +753,7 @@ fn main() {
 
         lbl_coords.set_label(format!("X: {} Y: {}", curcellmousepos.0, curcellmousepos.1).as_str());
 
-        app::repeat_timeout3(TICKTIME, handle);
+        app::repeat_timeout3(TICKTIME-starttime.elapsed().as_secs_f64(), handle);
     };
 
     app::add_timeout3(TICKTIME, tick);
