@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::collections::hash_map::{Keys, IntoKeys};
 use std::thread::Thread;
-use std::vec;
+use std::{vec, isize};
 use std::{rc::Rc};
 
 pub trait CellsGettable {
@@ -59,7 +59,7 @@ impl CellsGettable for Square {
 }
 
 impl Square {
-    fn new () -> Self { //initializes a FullSquare with all cells dead
+    fn new () -> Self { //initializes a Square with all cells dead
         let cells:[[bool;DIM];DIM] = [[false;DIM];DIM];
         Self{cell:cells,alive_cells:0}
     }
@@ -104,7 +104,12 @@ impl Field {
         let squarecoords = ((coords.0-localcoords.0)/DIM as isize,(coords.1-localcoords.1)/DIM as isize);
 
         match self.vec.get_mut(&squarecoords) {
-            Some(cursquare) => cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, val),
+            Some(cursquare) => {
+                cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, val);
+                if cursquare.alive_cells == 0 {
+                    self.vec.remove(&squarecoords);
+                }
+            },
             None => {
                 if val {
                     let mut cursquare = Square::new();
@@ -197,17 +202,7 @@ impl Field {
                 Self::insert_valid_only(coords,newchunk,&mut hs);
             }
             //The following is not possible anymore when using parallel code
-            /*
-            self.vec.remove_entry(&(x,y));
-
-            for dir in Direction::iter() {
-                let coords = Direction::shift((x,y), dir);
-                let cursquare = self.vec.get(&coords);
-                if let Some(Square::Full(square)) = cursquare {
-                    self.vec.insert(coords,square.getBoundary(dir));
-                }
-            }
-            */
+            //self.vec.remove_entry(&(x,y));
         }
         hs
     }
@@ -222,29 +217,18 @@ impl Field {
             splitkeysvec.get_mut(i%threadnum).unwrap().push(x);
         }
 
-        let mut handlevec = Vec::new();
-        
-        for x in splitkeysvec {
-            let test = self.clone(); //expensive
-            handlevec.push(std::thread::spawn(move || { //TODO this is duplicate code, perhaps make own function and compute chunks relevant for computation first
-                let mut hs:HashMap<(isize,isize),Square> = std::collections::HashMap::new();
-                
-                for (x,y) in x {
-                    let newchunk = test.update_chunk((x,y));
-                    Self::insert_valid_only((x,y),newchunk,&mut hs);
-        
-                    for dir in Direction::iter() {
-                        let coords = Direction::shift((x,y), dir);
-                        let newchunk = test.update_chunk(coords);
-                        Self::insert_valid_only(coords,newchunk,&mut hs);
-                    }
-                }
-                
-                hs
-            }))
-        }
+        //let mut hs:HashMap<(isize,isize),Square> = std::collections::HashMap::new();
+        let mut res = Vec::new(); 
 
-        let res = handlevec.into_iter().map(|x| x.join().unwrap());
+        std::thread::scope(|s| {
+            let mut handlevec = Vec::new();
+
+            for x in splitkeysvec {
+                handlevec.push(s.spawn(|| self.update_keys(x)));
+            }
+            res = handlevec.into_iter().map(|x| x.join().unwrap()).collect();
+        });
+
         self.vec.clear();
         for x in res {
             self.vec.extend(x);
@@ -287,10 +271,7 @@ impl Canvas {
         let yoffsetref = Rc::new(RefCell::new(yoffset));
         let linedistref = Rc::new(RefCell::new(linedist));
 
-        let mut surf = ImageSurface::new(frame.width(), frame.height(), false);
-
-        Canvas::redraw_canvas_no_ref(&mut frame, &mut surf, &mut field.borrow_mut(), xoffset, yoffset, linedist);       
-
+        let surf = ImageSurface::new(frame.width(), frame.height(), false);
         let surf = Rc::from(RefCell::from(surf));
 
         frame.draw({
@@ -418,14 +399,20 @@ impl Canvas {
                 }
             }
         });
-        Self { frame, surf , field, xoffsetref, yoffsetref, linedistref, drawmoderef}
+        let mut newobj = Self {frame, surf , field, xoffsetref, yoffsetref, linedistref, drawmoderef};
+        newobj.redraw_canvas(false);
+        newobj
     }
 
-    fn redraw_canvas_no_ref(frame:&mut Frame, surf:&mut ImageSurface, field:&mut Field, xoffset:i32, yoffset:i32, linedist:i32) {
+    fn redraw_canvas(&mut self, drawchunks:bool) {
+        let xoffset = *self.xoffsetref.borrow();
+        let yoffset = *self.yoffsetref.borrow();
+        let linedist = *self.linedistref.borrow();
+
         let xmod = xoffset.rem_euclid(linedist);
         let ymod = yoffset.rem_euclid(linedist);
         
-        ImageSurface::push_current(&surf);
+        ImageSurface::push_current(&self.surf.borrow_mut());
         draw_rect_fill(0, 0, WIDTH, HEIGHT, Color::White);
         
         set_draw_color(Color::Black);
@@ -439,32 +426,56 @@ impl Canvas {
 
         for xcoord in (-xmod..=WIDTH).step_by(linedist as usize) {
             for ycoord in (-ymod..=HEIGHT).step_by(linedist as usize) {
-                if field.get_cell(((xcoord+xoffset)/linedist) as isize, ((ycoord+yoffset)/linedist) as isize) {
+                if self.field.borrow().get_cell(((xcoord+xoffset)/linedist) as isize, ((ycoord+yoffset)/linedist) as isize) {
                     draw_rect_fill(xcoord, ycoord,linedist, linedist,Color::Black);
                 }
             }
         }
 
-        ImageSurface::pop_current();
-        frame.redraw();
-    }
+        if drawchunks {
+            let xoffset = *self.xoffsetref.borrow();
+            let yoffset = *self.yoffsetref.borrow();
+            let linedist = *self.linedistref.borrow()*DIM as i32; //we treat chunks as cells with size linedist*DIM when drawing
 
-    fn redraw_canvas(&mut self) {
-        Canvas::redraw_canvas_no_ref(&mut self.frame, &mut *self.surf.borrow_mut(), &mut *self.field.borrow_mut(), *self.xoffsetref.borrow(), *self.yoffsetref.borrow(), *self.linedistref.borrow());
+            let xmod = xoffset.rem_euclid(linedist);
+            let ymod = yoffset.rem_euclid(linedist);
+
+            set_draw_color(Color::Red);
+            set_line_style(LineStyle::Solid, 3);
+            let filter = |(x,y):&&(isize,isize)| {
+                if (*x as i32)*linedist-xoffset>=-xmod && (*x as i32)*linedist-xoffset<=WIDTH && (*y as i32)*linedist-yoffset>=-ymod && (*y as i32)*linedist-yoffset<=HEIGHT {
+                    //println!("Took {},{}",*x,*y);
+                    true
+                }
+                else {
+                    false
+                }
+            };
+            for (x,y) in self.field.borrow().vec.keys().filter(filter) {
+                draw_rect((*x as i32)*linedist-xoffset, (*y as i32)*linedist-yoffset, linedist, linedist);
+            }
+            set_line_style(LineStyle::Solid, 0);
+        }
+
+        ImageSurface::pop_current();
+        self.frame.redraw();
     } 
 }
 
 const WIDTH: i32 = 800*2;
 const HEIGHT: i32 = 600*2;
 const TICKTIME: f64 = 0.05; 
-const LINEDIST: i32 = 30;
+const STARTLINEDIST: i32 = 30;
 const INITIALUPDATEINTERVALL: f64 = 0.1; 
 const XSTARTOFFSET: i32 = 0;
 const YSTARTOFFSET: i32 = 0;
+const DRAWCHUNKS: bool = true;
 
 fltk::widget_extends!(Canvas, Frame, frame);
 
 use fltk::app::{remove_timeout3, TimeoutHandle, handle, MouseButton};
+use fltk::button;
+use fltk::draw::draw_rect;
 use fltk::{
     app,
     draw::{draw_line, draw_point, draw_rect_fill, set_draw_color, set_line_style, LineStyle},
@@ -472,7 +483,7 @@ use fltk::{
     frame::Frame,
     prelude::*,
     surface::ImageSurface,
-    window::Window, button::ToggleButton, text::TextDisplay, input::FloatInput, button::Button
+    window::Window, button::ToggleButton, text::TextDisplay, input::FloatInput, button::Button, button::CheckButton
 };
 
 //helper function for rotating double vecs
@@ -491,8 +502,8 @@ fn rot<T:Copy> (vec:&Vec<Vec<T>>) -> Vec<Vec<T>> {
 fn main() {
     //-----------------------------------------------------------------------------------------
     let glider =vec![vec![false,true,false],
-                                         vec![false,false,true],
-                                         vec![true,true,true]];
+                                    vec![false,false,true],
+                                    vec![true,true,true]];
 
     let mut field = Field::new();
     field.set_shape_at((0,0),rot(&glider)); 
@@ -506,7 +517,7 @@ fn main() {
         .with_label("Game of Life");
     
     let f = RefCell::new(field);
-    let canvas = Canvas::new(WIDTH, HEIGHT, f.into(), XSTARTOFFSET, YSTARTOFFSET, LINEDIST);
+    let canvas = Canvas::new(WIDTH, HEIGHT, f.into(), XSTARTOFFSET, YSTARTOFFSET, STARTLINEDIST);
     wind.add(&canvas.frame);
     let canvasref = Rc::new(RefCell::new(canvas));
 
@@ -514,6 +525,10 @@ fn main() {
     btn_stop_toggle.set_id("ToggleBtn");
     btn_stop_toggle.set_value(true);
     btn_stop_toggle.set_shortcut(fltk::enums::Shortcut::Alt); 
+
+    let mut btn_drawchunks = button::CheckButton::default().with_size(100,20).with_label("Draw chunks");
+    btn_drawchunks = btn_drawchunks.below_of(&btn_stop_toggle, 5);
+    wind.add(&btn_drawchunks);
 
     let mut btn_step = Button::default().with_label("Step").with_size(40, 40).left_of(&btn_stop_toggle, 5);
     let canvasref3 = canvasref.clone();
@@ -526,10 +541,12 @@ fn main() {
     let btn_stepref = Rc::new(RefCell::new(btn_step));
  
     let intervall = Rc::new(RefCell::new(INITIALUPDATEINTERVALL));
-    let mut inp_update_intervall = FloatInput::default().with_size(100, 20).below_of(&btn_stop_toggle, 5);
+    let mut inp_update_intervall = FloatInput::default().with_size(100, 20).below_of(&btn_drawchunks, 5).with_label("Update Intervall:");
+
     inp_update_intervall.set_value(format!("{}",INITIALUPDATEINTERVALL).as_str());
     wind.add(&inp_update_intervall);
     let inp_update_intervallref = Rc::new(RefCell::new(inp_update_intervall));
+    let btn_drawchunksref = Rc::new(RefCell::new(btn_drawchunks));
 
     let mut timeouthandle = app::add_timeout3(core::f64::MAX, |_|()); //<- i despise this. creates dummy timer just to fill timeouthandle
 
@@ -596,14 +613,14 @@ fn main() {
     let btn_stop_toggleref2 = btn_stop_toggleref.clone();
     let btn_stepref2 = btn_stepref.clone();
 
-    let mut starttime = std::time::Instant::now();
+    let mut starttime_tick = std::time::Instant::now();
     let tick = move |handle| {
         let xoffset = *canvasref2.borrow().xoffsetref.borrow();
         let yoffset = *canvasref2.borrow().yoffsetref.borrow();
         let linedist = *canvasref2.borrow().linedistref.borrow();
 
         //TODO find better way to redraw stuff, use damage values to determine what needs to be redrawn
-        canvasref2.borrow_mut().redraw_canvas();
+        canvasref2.borrow_mut().redraw_canvas(btn_drawchunksref.borrow().value()); //TODO this can take long, i could collect the time it takes or smth and substract it from the update intervall
         btn_stop_toggleref2.borrow_mut().redraw();
         btn_stepref2.borrow_mut().redraw();
         //println!("updated canvas");
@@ -616,8 +633,8 @@ fn main() {
 
         lbl_coords.set_label(format!("X: {} Y: {}", curcellmousepos.0, curcellmousepos.1).as_str());
 
-        app::repeat_timeout3(TICKTIME-starttime.elapsed().as_secs_f64(), handle);
-        starttime = std::time::Instant::now();
+        app::repeat_timeout3(TICKTIME-starttime_tick.elapsed().as_secs_f64(), handle);
+        starttime_tick = std::time::Instant::now();
     };
 
     app::add_timeout3(TICKTIME, tick);
