@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::collections::hash_map::{Keys, IntoKeys};
 use std::thread::Thread;
-use std::{vec, isize};
+use std::{vec, isize, fs};
 use std::{rc::Rc};
+use std::io;
 
 pub trait CellsGettable {
     fn get_cell(&self,x:usize,y:usize) -> bool;
@@ -119,10 +120,12 @@ impl Field {
         }
     }
 
-    fn set_shape_at(&mut self, coords:(isize,isize), shape:Vec<Vec<bool>>) { //takes vector of columns
+    fn set_shape_at(&mut self, coords:(isize,isize), shape:Vec<Vec<Option<bool>>>) { //takes vector of columns
         for x in 0..shape.len() {
             for y in 0..shape[x].len() {
-                self.set_cell((coords.0+x as isize,coords.1+y as isize), shape[x][y]);
+                if let Some(val)= shape[x][y] {
+                    self.set_cell((coords.0+x as isize,coords.1+y as isize), val);
+                }
             }
         }
     }
@@ -248,7 +251,7 @@ fn print (f:&Field) {
     }
 }
 
-use std::cell::RefCell;
+use std::cell::{RefCell, Ref};
 struct Canvas {
     frame: Frame,
     surf: Rc<RefCell<ImageSurface>>,
@@ -476,6 +479,8 @@ fltk::widget_extends!(Canvas, Frame, frame);
 use fltk::app::{remove_timeout3, TimeoutHandle, handle, MouseButton};
 use fltk::button;
 use fltk::draw::draw_rect;
+use fltk::enums::{Shortcut, CallbackTrigger};
+use fltk::menu::MenuFlag;
 use fltk::{
     app,
     draw::{draw_line, draw_point, draw_rect_fill, set_draw_color, set_line_style, LineStyle},
@@ -483,7 +488,7 @@ use fltk::{
     frame::Frame,
     prelude::*,
     surface::ImageSurface,
-    window::Window, button::ToggleButton, text::TextDisplay, input::FloatInput, button::Button, button::CheckButton
+    window::Window, button::ToggleButton, text::TextDisplay, input::FloatInput, button::Button, button::CheckButton, menu::Choice
 };
 
 //helper function for rotating double vecs
@@ -499,6 +504,14 @@ fn rot<T:Copy> (vec:&Vec<Vec<T>>) -> Vec<Vec<T>> {
     res
 }
 
+fn to_opt<T> (vec:Vec<T>) -> Vec<Option<T>> {
+    vec.into_iter().map(|x|Some(x)).collect()
+}
+
+fn to_opt2<T> (vec:Vec<Vec<T>>) -> Vec<Vec<Option<T>>> {
+    vec.into_iter().map(|x|to_opt(x)).collect()
+}
+
 fn main() {
     //-----------------------------------------------------------------------------------------
     let glider =vec![vec![false,true,false],
@@ -506,7 +519,7 @@ fn main() {
                                     vec![true,true,true]];
 
     let mut field = Field::new();
-    field.set_shape_at((0,0),rot(&glider)); 
+    field.set_shape_at((0,0),to_opt2(rot(&glider))); 
     
     //-----------------------------------------------------------------------------------------
 
@@ -526,9 +539,47 @@ fn main() {
     btn_stop_toggle.set_value(true);
     btn_stop_toggle.set_shortcut(fltk::enums::Shortcut::Alt); 
 
-    let mut btn_drawchunks = button::CheckButton::default().with_size(100,20).with_label("Draw chunks");
-    btn_drawchunks = btn_drawchunks.below_of(&btn_stop_toggle, 5);
+    let mut btn_drawchunks = CheckButton::default().with_size(100,20).with_label("Draw chunks").below_of(&btn_stop_toggle, 5);
     wind.add(&btn_drawchunks);
+
+    let mut mnu_shapeselect = Choice::default().with_size(100,20).below_of(&btn_drawchunks, 5).with_label("Insert shape:");
+    let shapedir = fs::read_dir("./shapes/").unwrap().map(|x| x.unwrap()); //TODO this can fail silenty e.g. when permissions are missing 
+    let mut menue = String::from("None");
+    for x in shapedir {
+        if x.metadata().unwrap().is_file() {
+            let mut nextitem = String::from("|");
+            nextitem.push_str(x.file_name().into_string().unwrap().as_str());
+            menue.push_str(nextitem.as_str());
+        }
+    }
+    println!("{}",menue);
+    mnu_shapeselect.clear();
+    mnu_shapeselect.add_choice(&menue);
+    //handle.set_value(0);
+
+    let mut last_selection = 0;
+    mnu_shapeselect.set_value(0);
+
+    mnu_shapeselect.set_callback(move |handle| {
+        if handle.value() == -1 {
+            handle.set_value(last_selection);
+        }
+        if last_selection != handle.value() {
+            println!("choose nr {}", handle.value());
+        }
+        last_selection = handle.value();       
+    });
+
+    mnu_shapeselect.handle(move |handle, event| {
+        match event {
+            Event::Leave => {
+                handle.do_callback();
+                true
+            },
+            _ => false
+        }
+    });
+    wind.add(&mnu_shapeselect);
 
     let mut btn_step = Button::default().with_label("Step").with_size(40, 40).left_of(&btn_stop_toggle, 5);
     let canvasref3 = canvasref.clone();
@@ -541,7 +592,8 @@ fn main() {
     let btn_stepref = Rc::new(RefCell::new(btn_step));
  
     let intervall = Rc::new(RefCell::new(INITIALUPDATEINTERVALL));
-    let mut inp_update_intervall = FloatInput::default().with_size(100, 20).below_of(&btn_drawchunks, 5).with_label("Update Intervall:");
+    let mut inp_update_intervall = FloatInput::default().with_size(100, 20).below_of(&mnu_shapeselect, 5).with_label("Update Intervall:");
+    let mnu_shapeselectref = Rc::new(RefCell::new(mnu_shapeselect));
 
     inp_update_intervall.set_value(format!("{}",INITIALUPDATEINTERVALL).as_str());
     wind.add(&inp_update_intervall);
@@ -555,6 +607,8 @@ fn main() {
     let inp_update_intervallref1 = inp_update_intervallref.clone();
     let intervallref1 = intervall.clone();
     let btn_stepref1 = btn_stepref.clone(); 
+    let mnu_shapeselectref1 = mnu_shapeselectref.clone();
+
     btn_stop_toggle.set_callback(move |handle| {
         if handle.value() {
             remove_timeout3(timeouthandle);
@@ -564,6 +618,7 @@ fn main() {
             inp_update_intervallref1.borrow_mut().set_value(format!{"{}",intervallref1.borrow()}.as_str());
             inp_update_intervallref1.borrow_mut().show();
             btn_stepref1.borrow_mut().show();
+            mnu_shapeselectref.borrow_mut().show();
             handle.set_label("Start");
         }
         else {
@@ -575,6 +630,7 @@ fn main() {
             *canvasref0.borrow_mut().drawmoderef.borrow_mut() = false;
             inp_update_intervallref1.borrow_mut().hide();
             btn_stepref1.borrow_mut().hide();
+            mnu_shapeselectref.borrow_mut().hide();
             handle.set_label("Stop");
             //------------------------------------
             //let btn_stop_toggleref1 = btn_stop_toggleref.clone();
