@@ -125,7 +125,7 @@ impl Field {
         }
     }
 
-    fn set_shape_at(&mut self, coords:(isize,isize), shape:Shape) { //takes vector of columns
+    fn set_shape_at(&mut self, coords:(isize,isize), shape:&Shape) { //takes vector of columns
         for x in 0..shape.len() {
             for y in 0..shape[x].len() {
                 if let Some(val)= shape[x][y] {
@@ -259,16 +259,16 @@ use std::cell::{RefCell, Ref};
 struct Canvas {
     frame: Frame,
     surf: Rc<RefCell<ImageSurface>>,
-    field:Rc<RefCell<Field>>,
-    xoffsetref:Rc<RefCell<i32>>,
-    yoffsetref:Rc<RefCell<i32>>,
-    linedistref:Rc<RefCell<i32>>,
-    drawmoderef:Rc<RefCell<bool>>,
-    shaperef:Rc<RefCell<Option<Shape>>>
+    field: Rc<RefCell<Field>>,
+    xoffsetref: Rc<RefCell<i32>>,
+    yoffsetref: Rc<RefCell<i32>>,
+    linedistref: Rc<RefCell<i32>>,
+    drawmoderef: Rc<RefCell<bool>>,
+    shaperef: Rc<RefCell<Option<Shape>>>
 }
 
 impl Canvas {
-    pub fn new(w: i32, h: i32, field: Rc<RefCell<Field>>,xoffset:i32,yoffset:i32, linedist:i32) -> Self {
+    pub fn new(w: i32, h: i32, field: Rc<RefCell<Field>>, xoffset:i32, yoffset:i32, linedist:i32) -> Self {
         let mut frame = Frame::default().with_size(w, h).center_of_parent();
         let drawmoderef = Rc::new(RefCell::new(true));
         let shaperef = Rc::new(RefCell::new(None::<Shape>));
@@ -296,7 +296,7 @@ impl Canvas {
             let mut lastclickedcoords = (0,0);
             let mut lastsetfieldcoords = (0,0);
 
-            let surf = surf.clone();
+            //let surf = surf.clone();
             let field = field.clone();
             let xoffsetref = xoffsetref.clone();
             let yoffsetref = yoffsetref.clone();
@@ -305,8 +305,8 @@ impl Canvas {
 
             let shaperef = shaperef.clone();
 
-            move |f, ev| {
-                let mut surf = surf.borrow();
+            move |_, ev| {
+                //let mut surf = surf.borrow();
                 let mut field = field.borrow_mut(); 
                 let shaperef = shaperef.clone();
 
@@ -499,6 +499,7 @@ use fltk::app::{remove_timeout3, TimeoutHandle, handle, MouseButton};
 use fltk::button;
 use fltk::draw::draw_rect;
 use fltk::enums::{Shortcut, CallbackTrigger, Align};
+use fltk::group::{Pack, PackType};
 use fltk::menu::MenuFlag;
 use fltk::{
     app,
@@ -512,7 +513,7 @@ use fltk::{
 
 //helper function for rotating double vecs 
 
-fn mirror_diag<T:Copy> (vec:&Vec<Vec<Option<T>>>) -> Vec<Vec<Option<T>>> {
+fn mirror_diag<T:Copy> (vec:&mut Vec<Vec<Option<T>>>) {
     let mut rotshape = Vec::new();
     let vect_maxlen = vec.iter().fold(0,|x,y| std::cmp::max(x,y.len()));
 
@@ -525,7 +526,7 @@ fn mirror_diag<T:Copy> (vec:&Vec<Vec<Option<T>>>) -> Vec<Vec<Option<T>>> {
         rotshape.push(curcolumn);
     }
     //rotshape.reverse();
-    rotshape
+    *vec = rotshape;
 }
 
 
@@ -556,12 +557,13 @@ type Shape = Vec<Vec<Option<bool>>>;
 
 fn main() {
     //-----------------------------------------------------------------------------------------
-    let glider = vec![vec![Some(false),Some(true),Some(false)],
+    let mut glider = vec![vec![Some(false),Some(true),Some(false)],
                                     vec![Some(false),Some(false),Some(true)],
                                     vec![Some(true),Some(true),Some(true)]];
+    mirror_diag(&mut glider);
 
     let mut field = Field::new();
-    field.set_shape_at((0,0),mirror_diag(&glider));
+    field.set_shape_at((0,0),&glider);
     
     //-----------------------------------------------------------------------------------------
 
@@ -574,20 +576,66 @@ fn main() {
     let f = RefCell::new(field);
     let canvas = Canvas::new(WIDTH, HEIGHT, f.into(), XSTARTOFFSET, YSTARTOFFSET, STARTLINEDIST);
     wind.add(&canvas.frame);
-    let canvasref = Rc::new(RefCell::new(canvas));
 
     let mut btn_stop_toggle = ToggleButton::default().with_label("Stop").with_size(100, 40).with_pos(WIDTH-100,0);
     btn_stop_toggle.set_id("ToggleBtn");
     btn_stop_toggle.set_value(true);
-    btn_stop_toggle.set_shortcut(fltk::enums::Shortcut::Alt); 
+    btn_stop_toggle.set_shortcut(fltk::enums::Shortcut::Alt);
+    wind.add(&btn_stop_toggle);
 
-    let mut btn_drawchunks = CheckButton::default().with_size(100,20).with_label("Draw chunks").below_of(&btn_stop_toggle, 5);
+    let btn_drawchunks = CheckButton::default().with_size(100,20).with_label("Draw chunks").below_of(&btn_stop_toggle, 5);
     wind.add(&btn_drawchunks);
 
-    let mut mnu_shapeselect = Choice::default().with_size(100,20).below_of(&btn_drawchunks, 5).with_label("Insert shape:");
-    let canvasref0 = canvasref.clone(); 
-    mnu_shapeselect.add("None", Shortcut::None, MenuFlag::Normal, move |_| {canvasref0.borrow_mut().set_shape(None); println!("None")}); //TODO disable flip/rot when none is selected
-    mnu_shapeselect.set_value(0);
+    let mnu_shapeselect = Choice::default().with_size(100,20).below_of(&btn_drawchunks, 5).with_label("Insert shape:");
+
+    let btn_step = Button::default().with_label("Step").with_size(40, 40).left_of(&btn_stop_toggle, 5);
+    
+    let mut pck_shapewidgets = Pack::default().with_size(100, 40).below_of(&mnu_shapeselect, 5).with_type(PackType::Horizontal);
+    pck_shapewidgets.set_spacing(100-2*45);
+    let btn_mirror_shape = Button::default().with_label("Flip").with_size(45, 40);
+    let btn_rotate_shape = Button::default().with_label("Rotate").with_size(45, 40);
+
+    pck_shapewidgets.add(&btn_mirror_shape);
+    pck_shapewidgets.add(&btn_rotate_shape);
+    pck_shapewidgets.deactivate(); //start out deactivated since None will be selected as initial shape
+
+    let mut inp_update_intervall = FloatInput::default().with_size(100, 20).below_of(&pck_shapewidgets, 5).with_label("Update Intervall:");
+    inp_update_intervall.set_value(format!("{}",INITIALUPDATEINTERVALL).as_str());
+
+    let mut grp_hidewidgets = Group::default().with_pos(0, 0).with_size(WIDTH, HEIGHT);
+    grp_hidewidgets.add(&inp_update_intervall);
+    grp_hidewidgets.add(&btn_step);
+    grp_hidewidgets.add(&mnu_shapeselect);
+    grp_hidewidgets.add(&pck_shapewidgets);
+    wind.add(&grp_hidewidgets);
+
+    let mut lbl_coords = TextDisplay::new(0,HEIGHT,100,0,"");
+    lbl_coords.set_frame(FrameType::NoBox); //<- i hate this
+    wind.add(&lbl_coords);
+
+    let canvas = Rc::new(RefCell::new(canvas));
+    let btn_stop_toggle = Rc::new(RefCell::new(btn_stop_toggle));
+    let btn_drawchunks = Rc::new(RefCell::new(btn_drawchunks));
+    let mnu_shapeselect = Rc::new(RefCell::new(mnu_shapeselect)); 
+    let btn_step = Rc::new(RefCell::new(btn_step)); 
+    let btn_mirror_shape = Rc::new(RefCell::new(btn_mirror_shape)); 
+    let btn_rotate_shape = Rc::new(RefCell::new(btn_rotate_shape)); 
+    let pck_shapewidgets = Rc::new(RefCell::new(pck_shapewidgets)); 
+    let grp_hidewidgets = Rc::new(RefCell::new(grp_hidewidgets)); 
+    let inp_update_intervall = Rc::new(RefCell::new(inp_update_intervall)); 
+    let lbl_coords = Rc::new(RefCell::new(lbl_coords)); 
+
+    {
+        let canvas = canvas.clone();
+        let pck_shapewidgets = pck_shapewidgets.clone();
+
+        mnu_shapeselect.borrow_mut().add("None", Shortcut::None, MenuFlag::Normal, move |_| {
+            canvas.borrow_mut().set_shape(None);
+            pck_shapewidgets.borrow_mut().deactivate();
+            println!("None")
+        });
+        mnu_shapeselect.borrow_mut().set_value(0);
+    }
 
     let shapedir = fs::read_dir("./shapes/");
     match shapedir {
@@ -595,183 +643,161 @@ fn main() {
             let shapedir = shapedir.into_iter().map(|x| x.unwrap());
             for x in shapedir {
                 if x.metadata().unwrap().is_file() {
-                    let canvasref = canvasref.clone(); 
-                    mnu_shapeselect.add(x.file_name().into_string().unwrap().as_str(),
+                    let canvas = canvas.clone(); 
+                    let pck_shapewidgets = pck_shapewidgets.clone();
+
+                    mnu_shapeselect.borrow_mut().add(x.file_name().into_string().unwrap().as_str(),
                         Shortcut::None,
                             MenuFlag::Normal, move |_| {
                                 let filepath = x.path();
                                 let mut curshape = parseFile(&filepath);
                                 if let Some(shape) = &mut curshape { //we have to mirror along the (0,0) -- (1,1) diagonal due to how we read the file
-                                    *shape = mirror_diag(shape);
+                                    mirror_diag(shape);
                                 }
-                                canvasref.borrow_mut().set_shape(curshape);
+                                canvas.borrow_mut().set_shape(curshape);
+                                pck_shapewidgets.borrow_mut().activate();
                                 println!("{}", filepath.to_str().unwrap());
                             });
                 }
             }
         },
-        Err(_) => println!("folder /shapes/ not found or not readable"),
+        Err(error) => println!("{}",error.to_string())
     }
-    wind.add(&mnu_shapeselect);
 
-    let mut btn_step = Button::default().with_label("Step").with_size(40, 40).left_of(&btn_stop_toggle, 5);
-    let canvasref3 = canvasref.clone();
-    btn_step.set_callback(move |_| {
-        let start = std::time::Instant::now();
-        canvasref3.borrow_mut().field.borrow_mut().update();
-        println!("Step took {} ms",start.elapsed().as_millis());
-    });
-    wind.add(&btn_step);
-    let btn_stepref = Rc::new(RefCell::new(btn_step));
+    {
+        let canvas = canvas.clone();
 
-    let mut grp_shapewidgets = Group::default().with_size(100, 40).below_of(&mnu_shapeselect, 5);
+        btn_step.borrow_mut().set_callback(move |_| {
+            let start = std::time::Instant::now();
+            canvas.borrow_mut().field.borrow_mut().update();
+            println!("Step took {} ms",start.elapsed().as_millis());
+        });
+    }
 
-    let canvasref0 = canvasref.clone();
-    let mut btn_mirror_shape = Button::default().with_label("Flip").with_size(40, 40).below_of(&mnu_shapeselect, 5);
-    btn_mirror_shape.set_callback(move |handle| {
-        let canvas = canvasref0.borrow_mut();
-        let mut curshape = canvas.shaperef.borrow_mut();
-        if let Some(shape) = &mut *curshape {
-            shape.reverse();
-        }
-    });
-    grp_shapewidgets.add(&btn_mirror_shape);
-    
+    {
+        let canvas = canvas.clone();
 
-    let canvasref0 = canvasref.clone();
-    let mut btn_rotate_shape = Button::default().with_label("Rotate").with_size(40, 40).right_of(&btn_mirror_shape, 5);
-    btn_rotate_shape.set_callback(move |handle| {
-        let canvas = canvasref0.borrow_mut();
-        let mut curshape = canvas.shaperef.borrow_mut();
-        if let Some(shape) = &mut *curshape {
-            let mut rotshape = Vec::new();
+        btn_mirror_shape.borrow_mut().set_callback(move |_| {
+            let canvas = canvas.borrow_mut();
+            let mut curshape = canvas.shaperef.borrow_mut();
+            if let Some(shape) = &mut *curshape {
+                shape.reverse();
+            }
+        });
+    }
 
-            let vect_maxlen = shape.iter().fold(0,|x,y| std::cmp::max(x,y.len()));
+    {
+        let canvas = canvas.clone();
 
-            for i in 0..vect_maxlen {
-                let mut curcolumn = Vec::new();
-                let shapeiter = shape.iter();
-                for j in shapeiter {
-                    curcolumn.push(*j.get(i).unwrap_or_else(||&None));
+        btn_rotate_shape.borrow_mut().set_callback(move |_| {
+            let canvas = canvas.borrow_mut();
+            let mut curshape = canvas.shaperef.borrow_mut();
+            if let Some(shape) = &mut *curshape {
+                let mut rotshape = Vec::new();
+
+                let vect_maxlen = shape.iter().fold(0,|x,y| std::cmp::max(x,y.len()));
+
+                for i in 0..vect_maxlen {
+                    let mut curcolumn = Vec::new();
+                    let shapeiter = shape.iter();
+                    for j in shapeiter {
+                        curcolumn.push(*j.get(i).unwrap_or_else(||&None));
+                    }
+                    rotshape.push(curcolumn);
                 }
-                rotshape.push(curcolumn);
+                rotshape.reverse();
+                *shape = rotshape;
             }
-            rotshape.reverse();
-            *shape = rotshape;
-        }
-    });
-    grp_shapewidgets.add(&btn_rotate_shape);
-    wind.add(&grp_shapewidgets);
- 
-    let intervall = Rc::new(RefCell::new(INITIALUPDATEINTERVALL));
-    let mut inp_update_intervall = FloatInput::default().with_size(100, 20).below_of(&grp_shapewidgets, 5).with_label("Update Intervall:");
-    let mnu_shapeselectref = Rc::new(RefCell::new(mnu_shapeselect));
-    let grp_shapewidgetsref = Rc::new(RefCell::new(grp_shapewidgets));
+        });
+    }
 
-    inp_update_intervall.set_value(format!("{}",INITIALUPDATEINTERVALL).as_str());
-    wind.add(&inp_update_intervall);
-    let inp_update_intervallref = Rc::new(RefCell::new(inp_update_intervall));
-    let btn_drawchunksref = Rc::new(RefCell::new(btn_drawchunks));
+    {
+        let mut intervall = INITIALUPDATEINTERVALL;
+        let mut timeouthandle = app::add_timeout3(core::f64::MAX, |_|()); //<- i despise this. creates dummy timer just to fill timeouthandle
 
-    let mut timeouthandle = app::add_timeout3(core::f64::MAX, |_|()); //<- i despise this. creates dummy timer just to fill timeouthandle
+        let canvas = canvas.clone();
+        let grp_hidewidgets = grp_hidewidgets.clone();
+        //let mut intervall = intervall.clone();
 
-    //TODO make better use of drawmode (maybe remove from field?)
-    let canvasref0 = canvasref.clone();
-    let inp_update_intervallref1 = inp_update_intervallref.clone();
-    let intervallref1 = intervall.clone();
-    let btn_stepref1 = btn_stepref.clone(); 
-    let mnu_shapeselectref1 = mnu_shapeselectref.clone();
-    let grp_shapewidgetsref1 = grp_shapewidgetsref.clone();
+        btn_stop_toggle.borrow_mut().set_callback(move |handle| {
+            println!("Toggle Btn Pressed");
+            if handle.value() {
+                remove_timeout3(timeouthandle);
+                //println!("timer destroyed");
 
-    btn_stop_toggle.set_callback(move |handle| {
-        if handle.value() {
-            remove_timeout3(timeouthandle);
-            //println!("timer destroyed");
-
-            *canvasref0.borrow_mut().drawmoderef.borrow_mut() = true;
-            inp_update_intervallref1.borrow_mut().set_value(format!{"{}",intervallref1.borrow()}.as_str());
-            inp_update_intervallref1.borrow_mut().show();
-            btn_stepref1.borrow_mut().show();
-            mnu_shapeselectref.borrow_mut().show();
-            grp_shapewidgetsref1.borrow_mut().show();
-            handle.set_label("Start");
-        }
-        else {
-            let oldintervall = *intervallref1.borrow();
-            let newintervall = inp_update_intervallref1.borrow().value().parse().unwrap_or(oldintervall);
-            if 0.0 <= newintervall && newintervall <= 10.0 {
-                intervallref1.replace(newintervall);
+                *canvas.borrow_mut().drawmoderef.borrow_mut() = true;
+                inp_update_intervall.borrow_mut().set_value(format!{"{intervall}"}.as_str());
+                grp_hidewidgets.borrow_mut().show();
+                handle.set_label("Start");
             }
-            *canvasref0.borrow_mut().drawmoderef.borrow_mut() = false;
-            inp_update_intervallref1.borrow_mut().hide();
-            btn_stepref1.borrow_mut().hide();
-            mnu_shapeselectref.borrow_mut().hide();
-            grp_shapewidgetsref1.borrow_mut().hide();
-            handle.set_label("Stop");
-            //------------------------------------
-            //let btn_stop_toggleref1 = btn_stop_toggleref.clone();
-            //let inp_update_intervallref2 = inp_update_intervallref.clone();
-            let canvasref1 = canvasref0.clone();
-            let intervallref2 = intervallref1.clone();
+            else {
+                let oldintervall = intervall;
+                let newintervall = inp_update_intervall.borrow().value().parse().unwrap_or(oldintervall);
+                if 0.0 <= newintervall && newintervall <= 10.0 {
+                    intervall = newintervall;
+                }
+                *canvas.borrow_mut().drawmoderef.borrow_mut() = false;
+                grp_hidewidgets.borrow_mut().hide();
+                handle.set_label("Stop");
+                //------------------------------------
+                //let btn_stop_toggleref1 = btn_stop_toggleref.clone();
+                //let inp_update_intervallref2 = inp_update_intervallref.clone();
+                let canvas = canvas.clone();
+                //let intervall = intervall.clone();
+                
+                let update = move |handle| {        
+                    let start = std::time::Instant::now();
+                    let fieldref = &canvas.borrow_mut().field;
+                    fieldref.borrow_mut().update_threaded();
 
-            let update = move |handle| {        
-                let start = std::time::Instant::now();
-                let fieldref = &canvasref1.borrow_mut().field;
-                fieldref.borrow_mut().update_threaded();
+                    let secs = start.elapsed().as_secs_f64();
+                    println!("elapsed time is {} s, setting timout {} s\n{} alive chunks", secs,intervall-secs,fieldref.borrow().vec.len());
 
-                let secs = start.elapsed().as_secs_f64();
-                println!("elapsed time is {} s, setting timout {} s\n{} alive chunks", secs,*intervallref2.borrow()-secs,fieldref.borrow().vec.len());
+                    app::repeat_timeout3(intervall-start.elapsed().as_secs_f64(), handle);
+                };
+            
+                timeouthandle = app::add_timeout3(intervall, update);
+                //println!("timer started for the first time with timeout {}", *intervall.borrow() );
+            
+                //------------------------------------
+            }
+        });
+    }
 
-                app::repeat_timeout3(*intervallref2.borrow()-start.elapsed().as_secs_f64(), handle);
-            };
-        
-            timeouthandle = app::add_timeout3(*intervall.borrow(), update);
-            //println!("timer started for the first time with timeout {}", *intervall.borrow() );
-        
-            //------------------------------------
-        }
-    }); //TODO perhaps add btn to canvas-type
-    wind.add(&btn_stop_toggle);
-    let btn_stop_toggleref = Rc::new(RefCell::new(btn_stop_toggle));
+    {
+        let mut starttime_tick = std::time::Instant::now();
 
-    let mut lbl_coords = TextDisplay::new(0,HEIGHT,100,0,"");
-    lbl_coords.set_frame(FrameType::NoBox); //<- i hate this
-    wind.add(&lbl_coords);
+        let btn_stop_toggle = btn_stop_toggle.clone();
+        let btn_step = btn_step.clone();
+        let pck_shapewidgets = pck_shapewidgets.clone();
 
+        let tick = move |handle| {
+            let xoffset = *canvas.borrow().xoffsetref.borrow();
+            let yoffset = *canvas.borrow().yoffsetref.borrow();
+            let linedist = *canvas.borrow().linedistref.borrow();
+
+            //TODO find better way to redraw stuff, use damage values to determine what needs to be redrawn
+            canvas.borrow_mut().redraw_canvas(btn_drawchunks.borrow().value()); //TODO this can take long, i could collect the time it takes or smth and substract it from the update intervall
+            btn_stop_toggle.borrow_mut().redraw();
+            btn_step.borrow_mut().redraw();
+            pck_shapewidgets.borrow_mut().redraw();
+            //println!("updated canvas");
+            //println!("redrew canvas in {} ms", start.elapsed().as_millis());
+
+            let xmod = (app::event_x()+xoffset).rem_euclid(linedist);
+            let ymod = (app::event_y()+yoffset).rem_euclid(linedist);
+
+            let curcellmousepos = (((app::event_x()+xoffset-xmod)/linedist),((app::event_y()+yoffset-ymod)/linedist));
+
+            lbl_coords.borrow_mut().set_label(format!("X: {} Y: {}", curcellmousepos.0, curcellmousepos.1).as_str());
+
+            app::repeat_timeout3(TICKTIME-starttime_tick.elapsed().as_secs_f64(), handle);
+            starttime_tick = std::time::Instant::now();
+        };
+
+        app::add_timeout3(TICKTIME, tick);
+    }
     //wind.end();
-    wind.show();
-    
-    let canvasref2 = canvasref.clone();
-    let btn_stop_toggleref2 = btn_stop_toggleref.clone();
-    let btn_stepref2 = btn_stepref.clone();
-    let grp_shapewidgetsref2 = grp_shapewidgetsref.clone();
-
-    let mut starttime_tick = std::time::Instant::now();
-    let tick = move |handle| {
-        let xoffset = *canvasref2.borrow().xoffsetref.borrow();
-        let yoffset = *canvasref2.borrow().yoffsetref.borrow();
-        let linedist = *canvasref2.borrow().linedistref.borrow();
-
-        //TODO find better way to redraw stuff, use damage values to determine what needs to be redrawn
-        canvasref2.borrow_mut().redraw_canvas(btn_drawchunksref.borrow().value()); //TODO this can take long, i could collect the time it takes or smth and substract it from the update intervall
-        btn_stop_toggleref2.borrow_mut().redraw();
-        btn_stepref2.borrow_mut().redraw();
-        grp_shapewidgetsref2.borrow_mut().redraw();
-        //println!("updated canvas");
-        //println!("redrew canvas in {} ms", start.elapsed().as_millis());
-
-        let xmod = (app::event_x()+xoffset).rem_euclid(linedist);
-        let ymod = (app::event_y()+yoffset).rem_euclid(linedist);
-
-        let curcellmousepos = (((app::event_x()+xoffset-xmod)/linedist),((app::event_y()+yoffset-ymod)/linedist));
-
-        lbl_coords.set_label(format!("X: {} Y: {}", curcellmousepos.0, curcellmousepos.1).as_str());
-
-        app::repeat_timeout3(TICKTIME-starttime_tick.elapsed().as_secs_f64(), handle);
-        starttime_tick = std::time::Instant::now();
-    };
-
-    app::add_timeout3(TICKTIME, tick);
-    
+    wind.show();    
     app.run().unwrap();
 }
