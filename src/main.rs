@@ -120,7 +120,8 @@ impl Field {
                     let mut cursquare = Square::new();
                     cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, true);
                     self.vec.insert(squarecoords, cursquare);
-                }}
+                }
+            }
         }
     }
 
@@ -143,7 +144,7 @@ impl Field {
                 counter+=1;
             }
         }
-        return counter;
+        counter
     }
 
     fn update_chunk(&self, coords:(isize,isize)) -> Option<Square> {
@@ -176,10 +177,10 @@ impl Field {
             }
         }
         if square.alive_cells == 0 {
-            return None;
+            None
         }
         else {
-            return Some(square);
+            Some(square)
         }
     }
 
@@ -509,18 +510,24 @@ use fltk::{
     window::Window, button::ToggleButton, text::TextDisplay, input::FloatInput, button::Button, button::CheckButton, menu::Choice, group::Group
 };
 
-//helper function for rotating double vecs
-fn mirror_diag<T:Copy> (vec:&Vec<Vec<T>>) -> Vec<Vec<T>> {
-    let mut res = Vec::new();
-    for i in 0..vec.len() {
-        let mut tmp = Vec::new();
-        for j in 0..vec[i].len() {
-            tmp.push(vec[j][i]);
+//helper function for rotating double vecs 
+
+fn mirror_diag<T:Copy> (vec:&Vec<Vec<Option<T>>>) -> Vec<Vec<Option<T>>> {
+    let mut rotshape = Vec::new();
+    let vect_maxlen = vec.iter().fold(0,|x,y| std::cmp::max(x,y.len()));
+
+    for i in 0..vect_maxlen {
+        let mut curcolumn = Vec::new();
+        let shapeiter = vec.iter();
+        for j in shapeiter {
+            curcolumn.push(*j.get(i).unwrap_or(&None));
         }
-        res.push(tmp);
+        rotshape.push(curcolumn);
     }
-    res
+    //rotshape.reverse();
+    rotshape
 }
+
 
 fn parseFile (file:&PathBuf) -> Option<Shape> { //Reads entire file into buffer, not a great idea for huge files
     let bytebuf: Vec<u8> = std::fs::read(file).expect("Todo file read error");
@@ -549,12 +556,12 @@ type Shape = Vec<Vec<Option<bool>>>;
 
 fn main() {
     //-----------------------------------------------------------------------------------------
-    let glider = vec![vec![false,true,false],
-                                    vec![false,false,true],
-                                    vec![true,true,true]];
+    let glider = vec![vec![Some(false),Some(true),Some(false)],
+                                    vec![Some(false),Some(false),Some(true)],
+                                    vec![Some(true),Some(true),Some(true)]];
 
     let mut field = Field::new();
-    field.set_shape_at((0,0),mirror_diag(&glider).into_iter().map(|x| x.into_iter().map(|x|Some(x)).collect()).collect()); 
+    field.set_shape_at((0,0),mirror_diag(&glider));
     
     //-----------------------------------------------------------------------------------------
 
@@ -579,25 +586,31 @@ fn main() {
 
     let mut mnu_shapeselect = Choice::default().with_size(100,20).below_of(&btn_drawchunks, 5).with_label("Insert shape:");
     let canvasref0 = canvasref.clone(); 
-    mnu_shapeselect.add("None", Shortcut::None, MenuFlag::Normal, move |_| {canvasref0.borrow_mut().set_shape(None); println!("None")});
+    mnu_shapeselect.add("None", Shortcut::None, MenuFlag::Normal, move |_| {canvasref0.borrow_mut().set_shape(None); println!("None")}); //TODO disable flip/rot when none is selected
     mnu_shapeselect.set_value(0);
 
-    let shapedir = fs::read_dir("./shapes/").unwrap().map(|x| x.unwrap()); //TODO this can fail silenty e.g. when permissions are missing
-    for x in shapedir {
-        if x.metadata().unwrap().is_file() {
-            let canvasref = canvasref.clone(); 
-            mnu_shapeselect.add(x.file_name().into_string().unwrap().as_str(),
-                Shortcut::None,
-                    MenuFlag::Normal, move |_| {
-                        let filepath = x.path();
-                        let mut curshape = parseFile(&filepath);
-                        if let Some(shape) = &mut curshape { //we have to mirror along the (0,0) -- (1,1) diagonal due to how we read the file
-                            *shape = mirror_diag(shape);
-                        }
-                        canvasref.borrow_mut().set_shape(curshape);
-                        println!("{}", filepath.to_str().unwrap());
-                    });
-        }
+    let shapedir = fs::read_dir("./shapes/");
+    match shapedir {
+        Ok(shapedir) => {
+            let shapedir = shapedir.into_iter().map(|x| x.unwrap());
+            for x in shapedir {
+                if x.metadata().unwrap().is_file() {
+                    let canvasref = canvasref.clone(); 
+                    mnu_shapeselect.add(x.file_name().into_string().unwrap().as_str(),
+                        Shortcut::None,
+                            MenuFlag::Normal, move |_| {
+                                let filepath = x.path();
+                                let mut curshape = parseFile(&filepath);
+                                if let Some(shape) = &mut curshape { //we have to mirror along the (0,0) -- (1,1) diagonal due to how we read the file
+                                    *shape = mirror_diag(shape);
+                                }
+                                canvasref.borrow_mut().set_shape(curshape);
+                                println!("{}", filepath.to_str().unwrap());
+                            });
+                }
+            }
+        },
+        Err(_) => println!("folder /shapes/ not found or not readable"),
     }
     wind.add(&mnu_shapeselect);
 
@@ -623,6 +636,7 @@ fn main() {
         }
     });
     grp_shapewidgets.add(&btn_mirror_shape);
+    
 
     let canvasref0 = canvasref.clone();
     let mut btn_rotate_shape = Button::default().with_label("Rotate").with_size(40, 40).right_of(&btn_mirror_shape, 5);
