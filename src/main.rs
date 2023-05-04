@@ -432,19 +432,19 @@ impl Canvas {
         let ymod = yoffset.rem_euclid(linedist);
         
         ImageSurface::push_current(&self.surf.borrow_mut());
-        draw_rect_fill(0, 0, WIDTH, HEIGHT, Color::White);
+        draw_rect_fill(0, 0, self.w(), self.h(), Color::White);
         
         set_draw_color(Color::Black);
 
-        for xcoord in (linedist-xmod..=WIDTH).step_by(linedist as usize) {
-            fltk::draw::draw_line(xcoord, 0, xcoord, HEIGHT);
+        for xcoord in (linedist-xmod..=self.w()).step_by(linedist as usize) {
+            fltk::draw::draw_line(xcoord, 0, xcoord, self.h());
         }
-        for ycoord in (linedist-ymod..=HEIGHT).step_by(linedist as usize) {
-            fltk::draw::draw_line(0, ycoord, WIDTH, ycoord);
+        for ycoord in (linedist-ymod..=self.h()).step_by(linedist as usize) {
+            fltk::draw::draw_line(0, ycoord, self.w(), ycoord);
         }
 
-        for xcoord in (-xmod..=WIDTH).step_by(linedist as usize) {
-            for ycoord in (-ymod..=HEIGHT).step_by(linedist as usize) {
+        for xcoord in (-xmod..=self.w()).step_by(linedist as usize) {
+            for ycoord in (-ymod..=self.h()).step_by(linedist as usize) {
                 if self.field.borrow().get_cell(((xcoord+xoffset)/linedist) as isize, ((ycoord+yoffset)/linedist) as isize) {
                     draw_rect_fill(xcoord, ycoord,linedist, linedist,Color::Black);
                 }
@@ -462,7 +462,7 @@ impl Canvas {
             set_draw_color(Color::Red);
             set_line_style(LineStyle::Solid, 3);
             let filter = |(x,y):&&(isize,isize)| {
-                if (*x as i32)*linedist-xoffset>=-xmod && (*x as i32)*linedist-xoffset<=WIDTH && (*y as i32)*linedist-yoffset>=-ymod && (*y as i32)*linedist-yoffset<=HEIGHT {
+                if (*x as i32)*linedist-xoffset>=-xmod && (*x as i32)*linedist-xoffset<=self.w() && (*y as i32)*linedist-yoffset>=-ymod && (*y as i32)*linedist-yoffset<=self.h() {
                     //println!("Took {},{}",*x,*y);
                     true
                 }
@@ -576,22 +576,37 @@ fn main() {
     let f = RefCell::new(field);
     let canvas = Canvas::new(WIDTH, HEIGHT, f.into(), XSTARTOFFSET, YSTARTOFFSET, STARTLINEDIST);
     wind.add(&canvas.frame);
+    wind.make_resizable(true);
 
-    let mut btn_stop_toggle = ToggleButton::default().with_label("Stop").with_size(100, 40).with_pos(WIDTH-100,0);
+    let mut btn_stop_toggle = ToggleButton::default().with_label("Stop").with_size(100, 40);//.with_pos(WIDTH-100,0);
     btn_stop_toggle.set_id("ToggleBtn");
     btn_stop_toggle.set_value(true);
     btn_stop_toggle.set_shortcut(fltk::enums::Shortcut::Alt);
-    wind.add(&btn_stop_toggle);
 
-    let btn_drawchunks = CheckButton::default().with_size(100,20).with_label("Draw chunks").below_of(&btn_stop_toggle, 5);
-    wind.add(&btn_drawchunks);
+    let btn_step = Button::default().with_label("Step").with_size(40, 40);//.left_of(&btn_stop_toggle, 5);
 
-    let mnu_shapeselect = Choice::default().with_size(100,20).below_of(&btn_drawchunks, 5).with_label("Insert shape:");
+    let mut pck_updatefield = Pack::default().with_size(145, 40).with_type(PackType::Horizontal);
+    pck_updatefield.set_spacing(5);
+    pck_updatefield.make_resizable(false);
+    pck_updatefield.add(&btn_stop_toggle);
+    pck_updatefield.add(&btn_step);
+    //wind.add(&pck_updatefield);
 
-    let btn_step = Button::default().with_label("Step").with_size(40, 40).left_of(&btn_stop_toggle, 5);
+    let btn_drawchunks = CheckButton::default().with_size(100,20).with_label("Draw chunks");//.below_of(&btn_stop_toggle, 5);
+
+    /*
+    let mut grp_alwaysvisible = Group::default().with_pos(0, 0).with_size(WIDTH, HEIGHT);
+    grp_alwaysvisible.add(&btn_stop_toggle);
+    grp_alwaysvisible.add(&btn_drawchunks);
+    grp_alwaysvisible.make_resizable(false);
+    wind.add(&grp_alwaysvisible);
+    */
+
+    let mnu_shapeselect = Choice::default().with_size(100,20).with_label("Insert shape:");
     
-    let mut pck_shapewidgets = Pack::default().with_size(100, 40).below_of(&mnu_shapeselect, 5).with_type(PackType::Horizontal);
+    let mut pck_shapewidgets = Pack::default().with_size(100, 40).with_type(PackType::Horizontal);
     pck_shapewidgets.set_spacing(100-2*45);
+    pck_shapewidgets.make_resizable(false);
     let btn_mirror_shape = Button::default().with_label("Flip").with_size(45, 40);
     let btn_rotate_shape = Button::default().with_label("Rotate").with_size(45, 40);
 
@@ -599,19 +614,34 @@ fn main() {
     pck_shapewidgets.add(&btn_rotate_shape);
     pck_shapewidgets.deactivate(); //start out deactivated since None will be selected as initial shape
 
-    let mut inp_update_intervall = FloatInput::default().with_size(100, 20).below_of(&pck_shapewidgets, 5).with_label("Update Intervall:");
+    let mut inp_update_intervall = FloatInput::default().with_size(100, 20).with_label("Update Intervall:");
     inp_update_intervall.set_value(format!("{}",INITIALUPDATEINTERVALL).as_str());
 
-    let mut grp_hidewidgets = Group::default().with_pos(0, 0).with_size(WIDTH, HEIGHT);
+    /*
+    let mut grp_hidewidgets = Group::default().with_pos(WIDTH-145, 0).with_size(WIDTH, HEIGHT);
     grp_hidewidgets.add(&inp_update_intervall);
     grp_hidewidgets.add(&btn_step);
     grp_hidewidgets.add(&mnu_shapeselect);
     grp_hidewidgets.add(&pck_shapewidgets);
+    grp_hidewidgets.make_resizable(false);
     wind.add(&grp_hidewidgets);
+    */
 
-    let mut lbl_coords = TextDisplay::new(0,HEIGHT,100,0,"");
+
+    //let mut lbl_coords = TextDisplay::new(0,HEIGHT,100,0,"");
+    let mut lbl_coords = TextDisplay::default().with_size(100, 0).with_pos(0, HEIGHT);
     lbl_coords.set_frame(FrameType::NoBox); //<- i hate this
     wind.add(&lbl_coords);
+
+    let mut pck_leftbarwidgets = Pack::default().with_pos(WIDTH-145, 0).with_size(145, HEIGHT).with_type(PackType::Vertical);
+    pck_leftbarwidgets.set_spacing(5);
+    pck_leftbarwidgets.make_resizable(false);
+    pck_leftbarwidgets.add(&pck_updatefield);
+    pck_leftbarwidgets.add(&btn_drawchunks);
+    pck_leftbarwidgets.add(&mnu_shapeselect);
+    pck_leftbarwidgets.add(&pck_shapewidgets);
+    pck_leftbarwidgets.add(&inp_update_intervall);
+    wind.add(&pck_leftbarwidgets);
 
     let canvas = Rc::new(RefCell::new(canvas));
     let btn_stop_toggle = Rc::new(RefCell::new(btn_stop_toggle));
@@ -621,9 +651,24 @@ fn main() {
     let btn_mirror_shape = Rc::new(RefCell::new(btn_mirror_shape)); 
     let btn_rotate_shape = Rc::new(RefCell::new(btn_rotate_shape)); 
     let pck_shapewidgets = Rc::new(RefCell::new(pck_shapewidgets)); 
-    let grp_hidewidgets = Rc::new(RefCell::new(grp_hidewidgets)); 
     let inp_update_intervall = Rc::new(RefCell::new(inp_update_intervall)); 
     let lbl_coords = Rc::new(RefCell::new(lbl_coords)); 
+
+    
+    {
+        let canvas = canvas.clone();
+
+        wind.resize_callback(move |_, _, _, width, height| {
+            canvas.borrow_mut().set_size(width, height);
+            *canvas.borrow_mut().surf.borrow_mut() = ImageSurface::new(width, height, false); //TODO how to simply resize ImageSurface?
+            pck_leftbarwidgets.set_pos(width-145, 0);
+            pck_leftbarwidgets.set_size(145,height);
+            //btn_stop_toggle.borrow_mut().set_pos(width-100,0);
+            //btn_drawchunks.borrow_mut().set_pos(btn_drawchunks.borrow().x(), y)
+            //grp_hidewidgets.borrow_mut().set_size(width, height);
+        });
+    }
+    
 
     {
         let canvas = canvas.clone();
@@ -716,7 +761,12 @@ fn main() {
         let mut timeouthandle = app::add_timeout3(core::f64::MAX, |_|()); //<- i despise this. creates dummy timer just to fill timeouthandle
 
         let canvas = canvas.clone();
-        let grp_hidewidgets = grp_hidewidgets.clone();
+
+        let inp_update_intervall = inp_update_intervall.clone();
+        let btn_step = btn_step.clone();
+        let mnu_shapeselect = mnu_shapeselect.clone();
+        let pck_shapewidgets = pck_shapewidgets.clone();
+        //let grp_hidewidgets = grp_hidewidgets.clone();
         //let mut intervall = intervall.clone();
 
         btn_stop_toggle.borrow_mut().set_callback(move |handle| {
@@ -727,17 +777,28 @@ fn main() {
 
                 *canvas.borrow_mut().drawmoderef.borrow_mut() = true;
                 inp_update_intervall.borrow_mut().set_value(format!{"{intervall}"}.as_str());
-                grp_hidewidgets.borrow_mut().show();
+
+                inp_update_intervall.borrow_mut().show();
+                btn_step.borrow_mut().show();
+                mnu_shapeselect.borrow_mut().show();
+                pck_shapewidgets.borrow_mut().show();
+
                 handle.set_label("Start");
             }
             else {
                 let oldintervall = intervall;
                 let newintervall = inp_update_intervall.borrow().value().parse().unwrap_or(oldintervall);
+
                 if 0.0 <= newintervall && newintervall <= 10.0 {
                     intervall = newintervall;
                 }
                 *canvas.borrow_mut().drawmoderef.borrow_mut() = false;
-                grp_hidewidgets.borrow_mut().hide();
+                
+                inp_update_intervall.borrow_mut().hide();
+                btn_step.borrow_mut().hide();
+                mnu_shapeselect.borrow_mut().hide();
+                pck_shapewidgets.borrow_mut().hide();
+
                 handle.set_label("Stop");
                 //------------------------------------
                 //let btn_stop_toggleref1 = btn_stop_toggleref.clone();
