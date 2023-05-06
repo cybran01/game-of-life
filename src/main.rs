@@ -1,521 +1,40 @@
-const DIM:usize = 8;
+#![windows_subsystem = "windows"]
 
-use std::collections::HashMap;
-use std::collections::binary_heap::Iter;
-use std::fmt::Error;
-use std::fs::File;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::collections::hash_map::{Keys, IntoKeys};
-use std::thread::Thread;
-use std::{vec, isize, fs};
-use std::{rc::Rc};
-use std::io::{self, BufReader, BufRead, Bytes, Read};
-
-pub trait CellsGettable {
-    fn get_cell(&self,x:usize,y:usize) -> bool;
-}
-#[derive(Clone)]
-struct Square {
-    cell: [[bool;DIM];DIM],
-    alive_cells: i32
-}
-#[derive(Clone)]
-struct Field {
-    vec:std::collections::HashMap<(isize,isize),Square>
-}
-
-enum Direction {
-    North,
-    South,
-    West,
-    East,
-    NorthWest,
-    NorthEast,
-    SouthWest,
-    SouthEast
-}
-
-impl Direction {
-    fn shift(coords:(isize,isize), dir:&Direction) -> (isize,isize){
-        match dir {Direction::North => (coords.0,coords.1+1),
-            Direction::South => (coords.0,coords.1-1),
-            Direction::West => (coords.0-1,coords.1),
-            Direction::East => (coords.0+1,coords.1),
-            Direction::NorthWest => (coords.0-1,coords.1+1),
-            Direction::NorthEast => (coords.0+1,coords.1+1),
-            Direction::SouthWest =>(coords.0-1,coords.1-1),
-            Direction::SouthEast => (coords.0+1,coords.1-1)
-        }
-    }
-    fn iter() -> std::slice::Iter<'static, Direction> {
-        use self::Direction::*;
-        static DIRECTIONS: [Direction; 8] = [North, South, East, West, NorthWest, NorthEast,SouthWest, SouthEast];
-        DIRECTIONS.iter()
-    }
-}
-
-impl CellsGettable for Square {
-    fn get_cell(&self,x:usize,y:usize) -> bool {
-        assert!((0..DIM).contains(&x));
-        assert!((0..DIM).contains(&y));
-        self.cell[x][y]
-    }
-}
-
-impl Square {
-    fn new () -> Self { //initializes a Square with all cells dead
-        let cells:[[bool;DIM];DIM] = [[false;DIM];DIM];
-        Self{cell:cells,alive_cells:0}
-    }
-    fn get_cell(&self,x:usize,y:usize) -> bool {
-        assert!((0..DIM).contains(&x));
-        assert!((0..DIM).contains(&y));
-
-        self.cell[x][y]
-    }
-    fn set_cell(&mut self,x:usize,y:usize,v:bool) {        
-        assert!((0..DIM).contains(&x));
-        assert!((0..DIM).contains(&y));
-
-        if self.cell[x][y] && !v{
-            self.alive_cells-=1;
-        }
-        else if !self.cell[x][y] && v {
-            self.alive_cells +=1;
-        }
-        self.cell[x][y] = v;
-    }
-}
-impl Field {
-    fn new () -> Self {
-        let vec = std::collections::HashMap::new();
-        Self {vec}
-    }
-    fn get_cell(&self,x:isize,y:isize) -> bool {
-        let dim = isize::try_from(DIM).unwrap();
-
-        let coord_in_square = (usize::try_from(x.rem_euclid(DIM.try_into().unwrap())).unwrap(),usize::try_from(y.rem_euclid(DIM.try_into().unwrap())).unwrap());
-        let square_coord = ((x-isize::try_from(coord_in_square.0).unwrap())/dim, (y-isize::try_from(coord_in_square.1).unwrap())/dim);
-        
-        match self.vec.get(&square_coord) {
-            Some(square) => square.get_cell(coord_in_square.0,coord_in_square.1),
-            None => false
-        }
-    }
-    
-    fn set_cell(&mut self, coords:(isize,isize), val:bool) {
-        let localcoords = (coords.0.rem_euclid(DIM as isize),coords.1.rem_euclid(DIM as isize));
-        let squarecoords = ((coords.0-localcoords.0)/DIM as isize,(coords.1-localcoords.1)/DIM as isize);
-
-        match self.vec.get_mut(&squarecoords) {
-            Some(cursquare) => {
-                cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, val);
-                if cursquare.alive_cells == 0 {
-                    self.vec.remove(&squarecoords);
-                }
-            },
-            None => {
-                if val {
-                    let mut cursquare = Square::new();
-                    cursquare.set_cell(localcoords.0 as usize, localcoords.1 as usize, true);
-                    self.vec.insert(squarecoords, cursquare);
-                }
-            }
-        }
-    }
-
-    fn set_shape_at(&mut self, coords:(isize,isize), shape:&Shape) { //takes vector of columns
-        for x in 0..shape.len() {
-            for y in 0..shape[x].len() {
-                if let Some(val)= shape[x][y] {
-                    self.set_cell((coords.0+x as isize,coords.1+y as isize), val);
-                }
-            }
-        }
-    }
-
-    fn eval_cells_alive_on_boundary(&self, x:isize, y:isize) -> i32 { //TODO maybe do this via maxdist of x,y values
-        let mut counter = 0;
-
-        for dir in Direction::iter() {
-            let coords = Direction::shift((x,y), dir);
-            if self.get_cell(coords.0, coords.1) {
-                counter+=1;
-            }
-        }
-        counter
-    }
-
-    fn update_chunk(&self, coords:(isize,isize)) -> Option<Square> {
-        let cursquare = self.vec.get(&coords);
-        let mut square;
-        let mut checkonlyboundary = false;
-
-        match cursquare {
-            Some(squareref) => square = squareref.clone(),
-            None => {
-                square = Square{cell:[[false;DIM];DIM],alive_cells:0};
-                checkonlyboundary = true;
-            }
-        }
-        for x in 0..DIM {
-            for y in 0..DIM {
-                if !checkonlyboundary || x == 0 || y == 0 || x == DIM-1 || y == DIM-1 {
-                    let curcoord = (coords.0*isize::try_from(DIM).unwrap()+isize::try_from(x).unwrap(),coords.1*isize::try_from(DIM).unwrap()+isize::try_from(y).unwrap());
-
-                    let cells_alive_on_boundary = self.eval_cells_alive_on_boundary(curcoord.0, curcoord.1);
-                    let curcell = square.get_cell(x, y);
-
-                    if !curcell && cells_alive_on_boundary == 3 { //a dead cell with 3 neighbors becomes alive
-                        square.set_cell(x,y,true);
-                    }
-                    else if curcell && !(cells_alive_on_boundary == 2 || cells_alive_on_boundary == 3) { //an alive cell that does not have 2 or 3 alive neighbors, dies 
-                        square.set_cell(x,y,false);
-                    } 
-                }
-            }
-        }
-        if square.alive_cells == 0 {
-            None
-        }
-        else {
-            Some(square)
-        }
-    }
-
-    fn insert_valid_only(key:(isize,isize), elem:Option<Square>, hs:&mut std::collections::HashMap<(isize,isize),Square>) { //TODO check if try_insert is finally out of nightly
-        if let Some(_) = elem {
-                if !hs.contains_key(&key) {
-                    hs.insert(key, elem.unwrap());
-                }
-        }
-    }
-
-    fn update (&mut self) {
-        let allkeys = self.vec.clone().into_keys();
-        self.vec = self.update_keys(allkeys);
-    }
-
-    fn update_keys<T:IntoIterator<Item = (isize,isize)>> (&self, keys:T) -> std::collections::HashMap<(isize,isize),Square> {
-        let mut hs = std::collections::HashMap::new();
-
-        for (x,y) in keys {
-            let newchunk = self.update_chunk((x,y));
-            Self::insert_valid_only((x,y),newchunk,&mut hs);
-
-            for dir in Direction::iter() {
-                let coords = Direction::shift((x,y), dir);
-                let newchunk = self.update_chunk(coords);
-                Self::insert_valid_only(coords,newchunk,&mut hs);
-            }
-            //The following is not possible anymore when using parallel code
-            //self.vec.remove_entry(&(x,y));
-        }
-        hs
-    }
-    fn update_threaded (&mut self) {
-        let allkeys = self.vec.clone().into_keys();
-        
-        let threadnum = std::cmp::max(allkeys.size_hint().0/10,1); //TODO dont use magic numbers here
-        println!("At least {} chunks, hence {} thread(s) to spawn", allkeys.size_hint().0, std::cmp::max(allkeys.size_hint().0/10,1));
-
-        let mut splitkeysvec = vec![Vec::new();threadnum];
-        for (i,x) in allkeys.enumerate() {
-            splitkeysvec.get_mut(i%threadnum).unwrap().push(x);
-        }
-
-        let mut res = Vec::new(); 
-
-        std::thread::scope(|s| {
-            let mut handlevec = Vec::new();
-
-            for x in splitkeysvec {
-                handlevec.push(s.spawn(|| self.update_keys(x)));
-            }
-            res = handlevec.into_iter().map(|x| x.join().unwrap()).collect();
-        });
-
-        self.vec.clear();
-        for x in res {
-            self.vec.extend(x);
-        }
-        
-    }
-}
-
-fn print (f:&Field) {
-    let dim = isize::try_from(DIM).unwrap();
-
-    for x in -1*dim..2*dim {
-        for y in -1*dim..2*dim {
-            print!("{}", i32::try_from(f.get_cell(x, y)).unwrap());
-        }
-        println!();
-    }
-}
-
-use std::cell::{RefCell, Ref};
-struct Canvas {
-    frame: Frame,
-    surf: Rc<RefCell<ImageSurface>>,
-    field: Rc<RefCell<Field>>,
-    xoffsetref: Rc<RefCell<i32>>,
-    yoffsetref: Rc<RefCell<i32>>,
-    linedistref: Rc<RefCell<i32>>,
-    drawmoderef: Rc<RefCell<bool>>,
-    shaperef: Rc<RefCell<Option<Shape>>>
-}
-
-impl Canvas {
-    pub fn new(w: i32, h: i32, field: Rc<RefCell<Field>>, xoffset:i32, yoffset:i32, linedist:i32) -> Self {
-        let mut frame = Frame::default().with_size(w, h).center_of_parent();
-        let drawmoderef = Rc::new(RefCell::new(true));
-        let shaperef = Rc::new(RefCell::new(None::<Shape>));
-        
-        frame.set_color(Color::White);
-        frame.set_frame(FrameType::DownBox);
-
-        let xoffsetref = Rc::new(RefCell::new(xoffset));
-        let yoffsetref = Rc::new(RefCell::new(yoffset));
-        let linedistref = Rc::new(RefCell::new(linedist));
-
-        let surf = ImageSurface::new(frame.width(), frame.height(), false);
-        let surf = Rc::from(RefCell::from(surf));
-
-        frame.draw({
-            let surf = surf.clone();
-            move |f| {
-                let surf = surf.borrow();
-                let mut img = surf.image().unwrap();
-                img.draw(f.x(), f.y(), f.w(), f.h());
-            }
-        });
-
-        frame.handle({
-            let mut lastclickedcoords = (0,0);
-            let mut lastsetfieldcoords = (0,0);
-
-            //let surf = surf.clone();
-            let field = field.clone();
-            let xoffsetref = xoffsetref.clone();
-            let yoffsetref = yoffsetref.clone();
-            let linedistref = linedistref.clone();
-            let drawmoderef = drawmoderef.clone();
-
-            let shaperef = shaperef.clone();
-
-            move |_, ev| {
-                //let mut surf = surf.borrow();
-                let mut field = field.borrow_mut(); 
-                let shaperef = shaperef.clone();
-
-                match ev {
-                    Event::Push => { //TODO the first part is probably only necessary when left clicked
-                        //println!("Push");
-                        let coords = app::event_coords();
-
-                        //println!("{}+{}",coords.0,*xoffsetref.borrow());
-                        //println!("{}+{}",coords.1,*yoffsetref.borrow());
-
-                        lastclickedcoords = coords;
-
-                        if *drawmoderef.borrow() && app::event_mouse_button() == app::MouseButton::Right {
-                            let xoffset = *xoffsetref.borrow();
-                            let yoffset = *yoffsetref.borrow();
-                            let linedist = *linedistref.borrow();
-
-                            let xmod = (coords.0+xoffset).rem_euclid(linedist);
-                            let ymod = (coords.1+yoffset).rem_euclid(linedist);
-
-                            let fieldcoords = (((coords.0+xoffset-xmod)/linedist) as isize,((coords.1+yoffset-ymod)/linedist) as isize);
-                            let curshape = &*shaperef.borrow();
-                            match curshape {
-                                Some(shape) => {
-                                    for (i,l) in shape.into_iter().enumerate() {
-                                        for (j,opt) in l.into_iter().enumerate() {
-                                            if let Some(val) = opt {
-                                                field.set_cell((fieldcoords.0+i as isize,fieldcoords.1+j as isize), *val);
-                                            }
-                                        }
-                                    }
-                                },
-                                None => {
-                                    let curval = field.get_cell(fieldcoords.0, fieldcoords.1);
-                                    field.set_cell(fieldcoords, !curval);
-                                    lastsetfieldcoords = fieldcoords;
-                                }
-                            }
-                        }
-                        true
-                    }
-                    Event::Drag => {
-                        if app::event_mouse_button() == MouseButton::Left {
-                            //println!("Drag left");
-
-                            let coords = app::event_coords();
-
-                            let newxoffset = *xoffsetref.borrow()-(coords.0-lastclickedcoords.0);
-                            let newyoffset = *yoffsetref.borrow()-(coords.1-lastclickedcoords.1);
-    
-                            xoffsetref.replace(newxoffset);
-                            yoffsetref.replace(newyoffset);
-    
-                            lastclickedcoords = coords;
-                            true
-                        }
-                        else if app::event_mouse_button() == MouseButton::Right && shaperef.borrow().is_none() {
-                            //println!("Drag right");
-                            if *drawmoderef.borrow() && app::event_mouse_button() == app::MouseButton::Right {
-                                let coords = app::event_coords();
-
-                                let xoffset = *xoffsetref.borrow();
-                                let yoffset = *yoffsetref.borrow();
-                                let linedist = *linedistref.borrow();
-
-                                let xmod = (coords.0+xoffset).rem_euclid(linedist);
-                                let ymod = (coords.1+yoffset).rem_euclid(linedist);
-
-                                let fieldcoords = (((coords.0+xoffset-xmod)/linedist) as isize,((coords.1+yoffset-ymod)/linedist) as isize);
-                                let curval = field.get_cell(fieldcoords.0, fieldcoords.1);
-
-                                if fieldcoords != lastsetfieldcoords {
-                                    field.set_cell(fieldcoords, !curval);
-                                    lastsetfieldcoords = fieldcoords;
-                                }
-                            }
-                            true
-                        }
-                        else {
-                            false
-                        }           
-                    }
-                    Event::MouseWheel => { 
-                        //println!("MouseWheel");
-                        let coords: (i32, i32) = app::event_coords();
-
-                        let xoffset = *xoffsetref.borrow();
-                        let yoffset = *yoffsetref.borrow();
-                        let linedist = *linedistref.borrow();
-
-                        match app::event_dy() {
-                            app::MouseWheel::Up => {
-                                if linedist > 2 {
-                                    *xoffsetref.borrow_mut()-= (coords.0+xoffset)/linedist;
-                                    *yoffsetref.borrow_mut()-= (coords.1+yoffset)/linedist;
-                                    (*linedistref.borrow_mut())-=1;
-                                }}, 
-                            app::MouseWheel::Down => {
-                                *xoffsetref.borrow_mut()+= (coords.0+xoffset)/linedist;
-                                *yoffsetref.borrow_mut()+= (coords.1+yoffset)/linedist;
-                                (*linedistref.borrow_mut())+=1;
-                            }, 
-                            _ => ()
-                        }
-                        true
-                    },
-                    _ => false,
-                }
-            }
-        });
-        let mut newobj = Self {frame, surf , field, xoffsetref, yoffsetref, linedistref, drawmoderef , shaperef};
-        newobj.redraw_canvas(false);
-        newobj
-    }
-
-    fn redraw_canvas(&mut self, drawchunks:bool) {
-        let xoffset = *self.xoffsetref.borrow();
-        let yoffset = *self.yoffsetref.borrow();
-        let linedist = *self.linedistref.borrow();
-
-        let xmod = xoffset.rem_euclid(linedist);
-        let ymod = yoffset.rem_euclid(linedist);
-        
-        ImageSurface::push_current(&self.surf.borrow_mut());
-        draw_rect_fill(0, 0, self.w(), self.h(), Color::White);
-        
-        set_draw_color(Color::Black);
-
-        for xcoord in (linedist-xmod..=self.w()).step_by(linedist as usize) {
-            fltk::draw::draw_line(xcoord, 0, xcoord, self.h());
-        }
-        for ycoord in (linedist-ymod..=self.h()).step_by(linedist as usize) {
-            fltk::draw::draw_line(0, ycoord, self.w(), ycoord);
-        }
-
-        for xcoord in (-xmod..=self.w()).step_by(linedist as usize) {
-            for ycoord in (-ymod..=self.h()).step_by(linedist as usize) {
-                if self.field.borrow().get_cell(((xcoord+xoffset)/linedist) as isize, ((ycoord+yoffset)/linedist) as isize) {
-                    draw_rect_fill(xcoord, ycoord,linedist, linedist,Color::Black);
-                }
-            }
-        }
-
-        if drawchunks {
-            let xoffset = *self.xoffsetref.borrow();
-            let yoffset = *self.yoffsetref.borrow();
-            let linedist = *self.linedistref.borrow()*DIM as i32; //we treat chunks as cells with size linedist*DIM when drawing
-
-            let xmod = xoffset.rem_euclid(linedist);
-            let ymod = yoffset.rem_euclid(linedist);
-
-            set_draw_color(Color::Red);
-            set_line_style(LineStyle::Solid, 3);
-            let filter = |(x,y):&&(isize,isize)| {
-                if (*x as i32)*linedist-xoffset>=-xmod && (*x as i32)*linedist-xoffset<=self.w() && (*y as i32)*linedist-yoffset>=-ymod && (*y as i32)*linedist-yoffset<=self.h() {
-                    //println!("Took {},{}",*x,*y);
-                    true
-                }
-                else {
-                    false
-                }
-            };
-            for (x,y) in self.field.borrow().vec.keys().filter(filter) {
-                draw_rect((*x as i32)*linedist-xoffset, (*y as i32)*linedist-yoffset, linedist, linedist);
-            }
-            set_line_style(LineStyle::Solid, 0);
-        }
-
-        ImageSurface::pop_current();
-        self.frame.redraw();
-    } 
-
-    fn set_shape (&mut self, shape:Option<Shape>) {
-        *self.shaperef.borrow_mut() = shape;
-    }
-}
-
-const WIDTH: i32 = 800*2;
-const HEIGHT: i32 = 600*2;
-const TICKTIME: f64 = 0.05; 
-const STARTLINEDIST: i32 = 30;
-const INITIALUPDATEINTERVALL: f64 = 0.1; 
-const XSTARTOFFSET: i32 = 0;
-const YSTARTOFFSET: i32 = 0;
-
-fltk::widget_extends!(Canvas, Frame, frame);
-
-use fltk::app::{remove_timeout3, TimeoutHandle, handle, MouseButton};
-use fltk::button;
-use fltk::draw::draw_rect;
-use fltk::enums::{Shortcut, CallbackTrigger, Align};
-use fltk::group::{Pack, PackType};
-use fltk::menu::MenuFlag;
 use fltk::{
     app,
-    draw::{draw_line, draw_point, draw_rect_fill, set_draw_color, set_line_style, LineStyle},
-    enums::{Color, Event, FrameType},
-    frame::Frame,
+    app::remove_timeout3,
+    button::{Button, CheckButton, ToggleButton},
+    enums::{Event, FrameType, Shortcut},
+    input::FloatInput,
+    menu::{Choice, MenuFlag},
+    prelude::WidgetExt,
     prelude::*,
-    surface::ImageSurface,
-    window::Window, button::ToggleButton, text::TextDisplay, input::FloatInput, button::Button, button::CheckButton, menu::Choice, group::Group
+    text::TextDisplay,
+    window::Window,
 };
+use std::cell::RefCell;
+use std::fs;
+use std::path::PathBuf;
+use std::rc::Rc;
 
-//helper function for rotating double vecs 
+pub mod canvas;
+pub mod field;
+use crate::canvas::Canvas;
+use crate::field::Shape;
 
-fn mirror_diag<T:Copy> (vec:&mut Vec<Vec<Option<T>>>) {
+const WIDTH: i32 = 800 * 2;
+const HEIGHT: i32 = 600 * 2;
+const TICKTIME: f64 = 0.05;
+const STARTLINEDIST: i32 = 30;
+const INITIALUPDATEINTERVALL: f64 = 0.1;
+const XSTARTOFFSET: i32 = 0;
+const YSTARTOFFSET: i32 = 0;
+const CHUNKSIZE: usize = 8;
+
+//helper function for rotating double vecs
+fn mirror_diag<T: Copy>(vec: &mut Vec<Vec<Option<T>>>) {
     let mut rotshape = Vec::new();
-    let vect_maxlen = vec.iter().fold(0,|x,y| std::cmp::max(x,y.len()));
+    let vect_maxlen = vec.iter().fold(0, |x, y| std::cmp::max(x, y.len()));
 
     for i in 0..vect_maxlen {
         let mut curcolumn = Vec::new();
@@ -529,23 +48,23 @@ fn mirror_diag<T:Copy> (vec:&mut Vec<Vec<Option<T>>>) {
     *vec = rotshape;
 }
 
-
-fn parseFile (file:&PathBuf) -> Option<Shape> { //Reads entire file into buffer, not a great idea for huge files
+fn parse_file(file: &PathBuf) -> Option<Shape> {
+    //Reads entire file into buffer, not a great idea for huge files
     let bytebuf: Vec<u8> = std::fs::read(file).expect("Todo file read error");
     let mut curshape = Vec::new();
 
-    let bytebuflines = bytebuf.split(|b| {*b == '\n' as u8}).map(|line| line.strip_suffix(b"\r").unwrap_or(line));
+    let bytebuflines = bytebuf
+        .split(|b| *b == b'\n')
+        .map(|line| line.strip_suffix(b"\r").unwrap_or(line));
 
     for line in bytebuflines {
         curshape.push(Vec::new());
         for b in line {
-            if *b == '0' as u8 {
+            if *b == b'0' {
                 curshape.last_mut().unwrap().push(Some(false));
-            }
-            else if *b == '1' as u8 {
+            } else if *b == b'1' {
                 curshape.last_mut().unwrap().push(Some(true));
-            }
-            else {
+            } else {
                 curshape.last_mut().unwrap().push(None);
             }
         }
@@ -553,46 +72,39 @@ fn parseFile (file:&PathBuf) -> Option<Shape> { //Reads entire file into buffer,
     Some(curshape)
 }
 
-type Shape = Vec<Vec<Option<bool>>>;
-
 fn main() {
-    //-----------------------------------------------------------------------------------------
-    let mut glider = vec![vec![Some(false),Some(true),Some(false)],
-                                    vec![Some(false),Some(false),Some(true)],
-                                    vec![Some(true),Some(true),Some(true)]];
-    mirror_diag(&mut glider);
-
-    let mut field = Field::new();
-    field.set_shape_at((0,0),&glider);
-    
-    //-----------------------------------------------------------------------------------------
-
     let app = app::App::default().with_scheme(app::Scheme::Gtk);
 
     let mut wind = Window::default()
         .with_size(WIDTH, HEIGHT)
         .with_label("Game of Life");
-    
-    let f = RefCell::new(field);
-    let canvas = Canvas::new(WIDTH, HEIGHT, f.into(), XSTARTOFFSET, YSTARTOFFSET, STARTLINEDIST);
-    wind.add(&canvas.frame);
+
+    //let curshape = Rc::new(RefCell::new(None));
+    let canvas = Canvas::new(
+        WIDTH,
+        HEIGHT,
+        CHUNKSIZE,
+        XSTARTOFFSET,
+        YSTARTOFFSET,
+        STARTLINEDIST,
+    );
+    wind.add(&*canvas);
     wind.make_resizable(true);
 
-    let mut btn_stop_toggle = ToggleButton::default().with_label("Stop").with_size(100, 40);//.with_pos(WIDTH-100,0);
+    //TODO perhaps add clear button?
+    let btn_step = Button::default().with_label("Step");
+    wind.add(&btn_step);
+
+    let mut btn_stop_toggle = ToggleButton::default().with_label("Stop");
     btn_stop_toggle.set_id("ToggleBtn");
     btn_stop_toggle.set_value(true);
     btn_stop_toggle.set_shortcut(fltk::enums::Shortcut::Alt);
+    wind.add(&btn_stop_toggle);
 
-    let btn_step = Button::default().with_label("Step").with_size(40, 40);//.left_of(&btn_stop_toggle, 5);
-
-    let mut pck_updatefield = Pack::default().with_size(145, 40).with_type(PackType::Horizontal);
-    pck_updatefield.set_spacing(5);
-    pck_updatefield.make_resizable(false);
-    pck_updatefield.add(&btn_stop_toggle);
-    pck_updatefield.add(&btn_step);
     //wind.add(&pck_updatefield);
 
-    let btn_drawchunks = CheckButton::default().with_size(100,20).with_label("Draw chunks");//.below_of(&btn_stop_toggle, 5);
+    let btn_drawchunks = CheckButton::default().with_label("Draw chunks");
+    wind.add(&btn_drawchunks);
 
     /*
     let mut grp_alwaysvisible = Group::default().with_pos(0, 0).with_size(WIDTH, HEIGHT);
@@ -602,20 +114,21 @@ fn main() {
     wind.add(&grp_alwaysvisible);
     */
 
-    let mnu_shapeselect = Choice::default().with_size(100,20).with_label("Insert shape:");
-    
-    let mut pck_shapewidgets = Pack::default().with_size(100, 40).with_type(PackType::Horizontal);
-    pck_shapewidgets.set_spacing(100-2*45);
-    pck_shapewidgets.make_resizable(false);
-    let btn_mirror_shape = Button::default().with_label("Flip").with_size(45, 40);
-    let btn_rotate_shape = Button::default().with_label("Rotate").with_size(45, 40);
+    let mnu_shapeselect = Choice::default().with_label("Insert shape:");
+    wind.add(&mnu_shapeselect);
 
-    pck_shapewidgets.add(&btn_mirror_shape);
-    pck_shapewidgets.add(&btn_rotate_shape);
-    pck_shapewidgets.deactivate(); //start out deactivated since None will be selected as initial shape
+    let mut btn_mirror_shape = Button::default().with_label("Flip");
 
-    let mut inp_update_intervall = FloatInput::default().with_size(100, 20).with_label("Update Intervall:");
-    inp_update_intervall.set_value(format!("{}",INITIALUPDATEINTERVALL).as_str());
+    btn_mirror_shape.deactivate(); //TODO deactivating widget causes resize to not be respected
+    wind.add(&btn_mirror_shape);
+
+    let mut btn_rotate_shape = Button::default().with_label("Rotate");
+    btn_rotate_shape.deactivate(); //TODO deactivating widget causes resize to not be respected
+    wind.add(&btn_rotate_shape);
+
+    let mut inp_update_intervall = FloatInput::default().with_label("Update intervall:");
+    inp_update_intervall.set_value(format!("{}", INITIALUPDATEINTERVALL).as_str());
+    wind.add(&inp_update_intervall);
 
     /*
     let mut grp_hidewidgets = Group::default().with_pos(WIDTH-145, 0).with_size(WIDTH, HEIGHT);
@@ -627,12 +140,12 @@ fn main() {
     wind.add(&grp_hidewidgets);
     */
 
-
     //let mut lbl_coords = TextDisplay::new(0,HEIGHT,100,0,"");
-    let mut lbl_coords = TextDisplay::default().with_size(100, 0).with_pos(0, HEIGHT);
+    let mut lbl_coords = TextDisplay::default();
     lbl_coords.set_frame(FrameType::NoBox); //<- i hate this
     wind.add(&lbl_coords);
 
+    /*
     let mut pck_leftbarwidgets = Pack::default().with_pos(WIDTH-145, 0).with_size(145, HEIGHT).with_type(PackType::Vertical);
     pck_leftbarwidgets.set_spacing(5);
     pck_leftbarwidgets.make_resizable(false);
@@ -642,71 +155,129 @@ fn main() {
     pck_leftbarwidgets.add(&pck_shapewidgets);
     pck_leftbarwidgets.add(&inp_update_intervall);
     wind.add(&pck_leftbarwidgets);
+    */
 
     let canvas = Rc::new(RefCell::new(canvas));
     let btn_stop_toggle = Rc::new(RefCell::new(btn_stop_toggle));
     let btn_drawchunks = Rc::new(RefCell::new(btn_drawchunks));
-    let mnu_shapeselect = Rc::new(RefCell::new(mnu_shapeselect)); 
-    let btn_step = Rc::new(RefCell::new(btn_step)); 
-    let btn_mirror_shape = Rc::new(RefCell::new(btn_mirror_shape)); 
-    let btn_rotate_shape = Rc::new(RefCell::new(btn_rotate_shape)); 
-    let pck_shapewidgets = Rc::new(RefCell::new(pck_shapewidgets)); 
-    let inp_update_intervall = Rc::new(RefCell::new(inp_update_intervall)); 
-    let lbl_coords = Rc::new(RefCell::new(lbl_coords)); 
+    let mnu_shapeselect = Rc::new(RefCell::new(mnu_shapeselect));
+    let btn_step = Rc::new(RefCell::new(btn_step));
+    let btn_mirror_shape = Rc::new(RefCell::new(btn_mirror_shape));
+    let btn_rotate_shape = Rc::new(RefCell::new(btn_rotate_shape));
+    //let pck_shapewidgets = Rc::new(RefCell::new(pck_shapewidgets));
+    let inp_update_intervall = Rc::new(RefCell::new(inp_update_intervall));
+    let lbl_coords = Rc::new(RefCell::new(lbl_coords));
 
-    
+    //let curshape = Rc::new(RefCell::new(None));
+
     {
         let canvas = canvas.clone();
+        let btn_stop_toggle = btn_stop_toggle.clone();
+        let btn_drawchunks = btn_drawchunks.clone();
+        let mnu_shapeselect = mnu_shapeselect.clone();
+        let btn_step = btn_step.clone();
+        let btn_mirror_shape = btn_mirror_shape.clone();
+        let btn_rotate_shape = btn_rotate_shape.clone();
+        let inp_update_intervall = inp_update_intervall.clone();
+        let lbl_coords = lbl_coords.clone();
 
         wind.resize_callback(move |_, _, _, width, height| {
+            //TODO remove magic numbers
             canvas.borrow_mut().set_size(width, height);
-            *canvas.borrow_mut().surf.borrow_mut() = ImageSurface::new(width, height, false); //TODO how to simply resize ImageSurface?
-            pck_leftbarwidgets.set_pos(width-145, 0);
-            pck_leftbarwidgets.set_size(145,height);
+
+            btn_stop_toggle.borrow_mut().set_pos(width - 100 - 5, 5);
+            btn_stop_toggle.borrow_mut().set_size(100, 40);
+
+            btn_drawchunks.borrow_mut().set_pos(width - 100 - 5, 45 + 5);
+            btn_drawchunks.borrow_mut().set_size(100, 20);
+
+            mnu_shapeselect
+                .borrow_mut()
+                .set_pos(width - 100 - 5, 70 + 5);
+            mnu_shapeselect.borrow_mut().set_size(100, 20);
+
+            btn_step.borrow_mut().set_pos(width - 145 - 5, 5);
+            btn_step.borrow_mut().set_size(40, 40);
+
+            btn_mirror_shape
+                .borrow_mut()
+                .set_pos(width - 100 - 5, 95 + 5);
+            btn_mirror_shape.borrow_mut().set_size(45, 40);
+
+            btn_rotate_shape
+                .borrow_mut()
+                .set_pos(width - 45 - 5, 95 + 5);
+            btn_rotate_shape.borrow_mut().set_size(45, 40);
+
+            inp_update_intervall
+                .borrow_mut()
+                .set_pos(width - 100 - 5, 140 + 5);
+            inp_update_intervall.borrow_mut().set_size(100, 20);
+
+            lbl_coords.borrow_mut().set_pos(0, height);
+            lbl_coords.borrow_mut().set_size(100, 0);
+
+            //pck_leftbarwidgets.set_pos(width-145, 0);
+            //pck_leftbarwidgets.set_size(145,height);
+            //lbl_coords.borrow_mut().set_pos(0, height);
             //btn_stop_toggle.borrow_mut().set_pos(width-100,0);
             //btn_drawchunks.borrow_mut().set_pos(btn_drawchunks.borrow().x(), y)
             //grp_hidewidgets.borrow_mut().set_size(width, height);
         });
     }
-    
 
     {
         let canvas = canvas.clone();
-        let pck_shapewidgets = pck_shapewidgets.clone();
+        let btn_mirror_shape = btn_mirror_shape.clone();
+        let btn_rotate_shape = btn_rotate_shape.clone();
+        //let curshape = curshape.clone();
 
-        mnu_shapeselect.borrow_mut().add("None", Shortcut::None, MenuFlag::Normal, move |_| {
-            canvas.borrow_mut().set_shape(None);
-            pck_shapewidgets.borrow_mut().deactivate();
-            println!("None")
-        });
+        mnu_shapeselect
+            .borrow_mut()
+            .add("None", Shortcut::None, MenuFlag::Normal, move |_| {
+                canvas.borrow_mut().set_curshape(None);
+                btn_mirror_shape.borrow_mut().deactivate();
+                btn_rotate_shape.borrow_mut().deactivate();
+                println!("None")
+            });
         mnu_shapeselect.borrow_mut().set_value(0);
     }
 
-    let shapedir = fs::read_dir("./shapes/");
-    match shapedir {
-        Ok(shapedir) => {
-            let shapedir = shapedir.into_iter().map(|x| x.unwrap());
-            for x in shapedir {
-                if x.metadata().unwrap().is_file() {
-                    let canvas = canvas.clone(); 
-                    let pck_shapewidgets = pck_shapewidgets.clone();
+    {
+        let shapedir = fs::read_dir("./shapes/");
 
-                    mnu_shapeselect.borrow_mut().add(x.file_name().into_string().unwrap().as_str(),
-                        Shortcut::None,
-                            MenuFlag::Normal, move |_| {
+        match shapedir {
+            Ok(shapedir) => {
+                let shapedir = shapedir.into_iter().map(|x| x.unwrap());
+                for x in shapedir {
+                    if x.metadata().unwrap().is_file() {
+                        //let curshaperef = curshape.clone();
+                        let btn_mirror_shape = btn_mirror_shape.clone();
+                        let btn_rotate_shape = btn_rotate_shape.clone();
+                        let canvas = canvas.clone();
+
+                        mnu_shapeselect.borrow_mut().add(
+                            x.file_name().into_string().unwrap().as_str(),
+                            Shortcut::None,
+                            MenuFlag::Normal,
+                            move |_| {
                                 let filepath = x.path();
-                                let mut curshape = parseFile(&filepath);
-                                if let Some(shape) = &mut curshape { //we have to mirror along the (0,0) -- (1,1) diagonal due to how we read the file
+                                let mut curshape = parse_file(&filepath);
+                                if let Some(shape) = &mut curshape {
+                                    //we have to mirror along the (0,0) -- (1,1) diagonal due to how we read the file
                                     mirror_diag(shape);
                                 }
-                                canvas.borrow_mut().set_shape(curshape);
-                                pck_shapewidgets.borrow_mut().activate();
+                                canvas.borrow_mut().set_curshape(curshape);
+                                btn_mirror_shape.borrow_mut().activate();
+                                btn_rotate_shape.borrow_mut().activate();
                                 println!("{}", filepath.to_str().unwrap());
-                            });
+                            },
+                        );
+                    }
                 }
             }
-        },
-        Err(error) => println!("{}",error.to_string())
+            Err(error) => println!("{}", error),
+        }
     }
 
     {
@@ -714,60 +285,81 @@ fn main() {
 
         btn_step.borrow_mut().set_callback(move |_| {
             let start = std::time::Instant::now();
-            canvas.borrow_mut().field.borrow_mut().update();
-            println!("Step took {} ms",start.elapsed().as_millis());
+            canvas.borrow_mut().update();
+            println!("Step took {} ms", start.elapsed().as_millis());
         });
     }
 
     {
         let canvas = canvas.clone();
+        let curshape = canvas.borrow().get_curshaperef();
 
-        btn_mirror_shape.borrow_mut().set_callback(move |_| {
-            let canvas = canvas.borrow_mut();
-            let mut curshape = canvas.shaperef.borrow_mut();
-            if let Some(shape) = &mut *curshape {
-                shape.reverse();
-            }
-        });
-    }
-
-    {
-        let canvas = canvas.clone();
-
-        btn_rotate_shape.borrow_mut().set_callback(move |_| {
-            let canvas = canvas.borrow_mut();
-            let mut curshape = canvas.shaperef.borrow_mut();
-            if let Some(shape) = &mut *curshape {
-                let mut rotshape = Vec::new();
-
-                let vect_maxlen = shape.iter().fold(0,|x,y| std::cmp::max(x,y.len()));
-
-                for i in 0..vect_maxlen {
-                    let mut curcolumn = Vec::new();
-                    let shapeiter = shape.iter();
-                    for j in shapeiter {
-                        curcolumn.push(*j.get(i).unwrap_or_else(||&None));
-                    }
-                    rotshape.push(curcolumn);
+        btn_mirror_shape.borrow_mut().handle(move |_, ev| match ev {
+            Event::Push => {
+                let mut curshape = curshape.borrow_mut();
+                if let Some(shape) = &mut *curshape {
+                    shape.reverse();
                 }
-                rotshape.reverse();
-                *shape = rotshape;
+                true
             }
+            Event::Resize => {
+                println!("btn_rotate_shape resized");
+                true
+            }
+            _ => false,
+        });
+    }
+
+    {
+        let canvas = canvas.clone();
+        //let curshape = curshape.clone();
+
+        btn_rotate_shape.borrow_mut().handle(move |_, ev| match ev {
+            Event::Push => {
+                let curshape = canvas.borrow().get_curshaperef();
+                let mut curshape = curshape.borrow_mut();
+
+                if let Some(shape) = &mut *curshape {
+                    let mut rotshape = Vec::new();
+
+                    let vect_maxlen = shape.iter().fold(0, |x, y| std::cmp::max(x, y.len()));
+
+                    for i in 0..vect_maxlen {
+                        let mut curcolumn = Vec::new();
+                        let shapeiter = shape.iter();
+                        for j in shapeiter {
+                            curcolumn.push(*j.get(i).unwrap_or(&None));
+                        }
+                        rotshape.push(curcolumn);
+                    }
+                    rotshape.reverse();
+                    *shape = rotshape;
+                }
+                true
+            }
+            Event::Deactivate => {
+                println!("btn_rotate_shape resized");
+                true
+            }
+            _ => false,
         });
     }
 
     {
         let mut intervall = INITIALUPDATEINTERVALL;
-        let mut timeouthandle = app::add_timeout3(core::f64::MAX, |_|()); //<- i despise this. creates dummy timer just to fill timeouthandle
+        let mut timeouthandle = app::add_timeout3(core::f64::MAX, |_| ()); //<- i despise this. creates dummy timer just to fill timeouthandle
 
         let canvas = canvas.clone();
 
+        let hidewidgets: Vec<Rc<RefCell<dyn WidgetExt>>> = vec![
+            btn_step.clone(),
+            inp_update_intervall.clone(),
+            mnu_shapeselect.clone(),
+            btn_mirror_shape.clone(),
+            btn_rotate_shape.clone(),
+        ];
+
         let inp_update_intervall = inp_update_intervall.clone();
-        let btn_step = btn_step.clone();
-        let mnu_shapeselect = mnu_shapeselect.clone();
-        let pck_shapewidgets = pck_shapewidgets.clone();
-        //let grp_hidewidgets = grp_hidewidgets.clone();
-        //let mut intervall = intervall.clone();
 
         btn_stop_toggle.borrow_mut().set_callback(move |handle| {
             println!("Toggle Btn Pressed");
@@ -775,29 +367,32 @@ fn main() {
                 remove_timeout3(timeouthandle);
                 //println!("timer destroyed");
 
-                *canvas.borrow_mut().drawmoderef.borrow_mut() = true;
-                inp_update_intervall.borrow_mut().set_value(format!{"{intervall}"}.as_str());
+                canvas.borrow_mut().set_drawmode(true);
+                inp_update_intervall
+                    .borrow_mut()
+                    .set_value(format! {"{intervall}"}.as_str());
 
-                inp_update_intervall.borrow_mut().show();
-                btn_step.borrow_mut().show();
-                mnu_shapeselect.borrow_mut().show();
-                pck_shapewidgets.borrow_mut().show();
+                for widgetref in &hidewidgets {
+                    widgetref.borrow_mut().show();
+                }
 
                 handle.set_label("Start");
-            }
-            else {
+            } else {
                 let oldintervall = intervall;
-                let newintervall = inp_update_intervall.borrow().value().parse().unwrap_or(oldintervall);
+                let newintervall = inp_update_intervall
+                    .borrow()
+                    .value()
+                    .parse()
+                    .unwrap_or(oldintervall);
 
-                if 0.0 <= newintervall && newintervall <= 10.0 {
+                if 0.0 <= newintervall {
                     intervall = newintervall;
                 }
-                *canvas.borrow_mut().drawmoderef.borrow_mut() = false;
-                
-                inp_update_intervall.borrow_mut().hide();
-                btn_step.borrow_mut().hide();
-                mnu_shapeselect.borrow_mut().hide();
-                pck_shapewidgets.borrow_mut().hide();
+                canvas.borrow_mut().set_drawmode(false);
+
+                for widgetref in &hidewidgets {
+                    widgetref.borrow_mut().hide();
+                }
 
                 handle.set_label("Stop");
                 //------------------------------------
@@ -805,21 +400,25 @@ fn main() {
                 //let inp_update_intervallref2 = inp_update_intervallref.clone();
                 let canvas = canvas.clone();
                 //let intervall = intervall.clone();
-                
-                let update = move |handle| {        
+
+                let update = move |handle| {
                     let start = std::time::Instant::now();
-                    let fieldref = &canvas.borrow_mut().field;
-                    fieldref.borrow_mut().update_threaded();
+                    canvas.borrow_mut().update_threaded(10, 50);
 
                     let secs = start.elapsed().as_secs_f64();
-                    println!("elapsed time is {} s, setting timout {} s\n{} alive chunks", secs,intervall-secs,fieldref.borrow().vec.len());
+                    println!(
+                        "elapsed time is {} s, setting timout {} s\n{} alive chunks",
+                        secs,
+                        intervall - secs,
+                        canvas.borrow().len()
+                    );
 
-                    app::repeat_timeout3(intervall-start.elapsed().as_secs_f64(), handle);
+                    app::repeat_timeout3(intervall - start.elapsed().as_secs_f64(), handle);
                 };
-            
+
                 timeouthandle = app::add_timeout3(intervall, update);
                 //println!("timer started for the first time with timeout {}", *intervall.borrow() );
-            
+
                 //------------------------------------
             }
         });
@@ -830,35 +429,45 @@ fn main() {
 
         let btn_stop_toggle = btn_stop_toggle.clone();
         let btn_step = btn_step.clone();
-        let pck_shapewidgets = pck_shapewidgets.clone();
+        let btn_mirror_shape = btn_mirror_shape.clone();
+        let btn_rotate_shape = btn_rotate_shape.clone();
 
         let tick = move |handle| {
-            let xoffset = *canvas.borrow().xoffsetref.borrow();
-            let yoffset = *canvas.borrow().yoffsetref.borrow();
-            let linedist = *canvas.borrow().linedistref.borrow();
+            let offset = canvas.borrow().offset();
+            let xoffset = offset.0;
+            let yoffset = offset.1;
+            let linedist = canvas.borrow().linedist();
 
             //TODO find better way to redraw stuff, use damage values to determine what needs to be redrawn
-            canvas.borrow_mut().redraw_canvas(btn_drawchunks.borrow().value()); //TODO this can take long, i could collect the time it takes or smth and substract it from the update intervall
+            canvas
+                .borrow_mut()
+                .redraw_canvas(btn_drawchunks.borrow().value()); //TODO this can take long, i could collect the time it takes or smth and substract it from the update intervall
             btn_stop_toggle.borrow_mut().redraw();
             btn_step.borrow_mut().redraw();
-            pck_shapewidgets.borrow_mut().redraw();
+            btn_mirror_shape.borrow_mut().redraw();
+            btn_rotate_shape.borrow_mut().redraw();
             //println!("updated canvas");
             //println!("redrew canvas in {} ms", start.elapsed().as_millis());
 
-            let xmod = (app::event_x()+xoffset).rem_euclid(linedist);
-            let ymod = (app::event_y()+yoffset).rem_euclid(linedist);
+            let xmod = (app::event_x() + xoffset).rem_euclid(linedist);
+            let ymod = (app::event_y() + yoffset).rem_euclid(linedist);
 
-            let curcellmousepos = (((app::event_x()+xoffset-xmod)/linedist),((app::event_y()+yoffset-ymod)/linedist));
+            let curcellmousepos = (
+                ((app::event_x() + xoffset - xmod) / linedist),
+                ((app::event_y() + yoffset - ymod) / linedist),
+            );
 
-            lbl_coords.borrow_mut().set_label(format!("X: {} Y: {}", curcellmousepos.0, curcellmousepos.1).as_str());
+            lbl_coords
+                .borrow_mut()
+                .set_label(format!("X: {} Y: {}", curcellmousepos.0, curcellmousepos.1).as_str());
 
-            app::repeat_timeout3(TICKTIME-starttime_tick.elapsed().as_secs_f64(), handle);
+            app::repeat_timeout3(TICKTIME - starttime_tick.elapsed().as_secs_f64(), handle);
             starttime_tick = std::time::Instant::now();
         };
 
         app::add_timeout3(TICKTIME, tick);
     }
     //wind.end();
-    wind.show();    
+    wind.show();
     app.run().unwrap();
 }
