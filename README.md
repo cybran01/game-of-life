@@ -1,5 +1,5 @@
 # Game of Life
-A simple implementation of Conways Game of Life in Rust, with a GUI powered by FLTK.
+A simple implementation of Conways Game of Life in Rust, with a GUI powered by FLTK (see [here](https://fltk-rs.github.io/fltk-book/Setup.html) for setup).
 
 The simulation grid can be dragged via left mouse as well as zoomed via the scroll wheel.
 When the simulation is stopped, right mouse can be used to draw directly on the grid or alternatively to place a custom pre-drawn shape that can be selected.
@@ -19,5 +19,5 @@ For example, consider the following three versions of a glider-shape:
 ````
 By the above rules, the first and third have identical behavior.
 All three versions will produce a glider provided the cells they are placed on are empty. 
-If they are not, the first and third one will not produce the shape of a glider;
+If they are not, the first and third one will not necessarily produce the shape of a glider;
 the second will.
