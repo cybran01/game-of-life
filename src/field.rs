@@ -6,7 +6,6 @@ pub struct Square {
     cell: Vec<Vec<bool>>,
     alive_cells: i32,
 }
-#[derive(Clone)]
 pub struct Field {
     pub vec: HashMap<(isize, isize), Square>,
     chunksize: usize,
@@ -47,7 +46,7 @@ impl Direction {
 
 impl Square {
     fn new(size: usize) -> Self {
-        //initializes a Square with all cells dead
+        //initializes a square with all cells dead
         let cells = vec![vec![false; size]; size];
         Self {
             size,
@@ -126,7 +125,6 @@ impl Field {
     }
 
     pub fn set_shape_at(&mut self, coords: (isize, isize), shape: &Shape) {
-        //takes vector of columns
         for (x, line) in shape.iter().enumerate() {
             for (y, item) in line.iter().enumerate() {
                 if let Some(val) = item {
@@ -202,7 +200,6 @@ impl Field {
         elem: Option<Square>,
         hs: &mut HashMap<(isize, isize), Square>,
     ) {
-        //TODO check if try_insert is finally out of nightly
         if let Some(value) = elem {
             hs.entry(key).or_insert(value);
         }
@@ -228,8 +225,6 @@ impl Field {
                 let newchunk = self.update_chunk(coords);
                 Self::insert_valid_only(coords, newchunk, &mut hs);
             }
-            //The following is not possible anymore when using parallel code
-            //self.vec.remove_entry(&(x,y));
         }
         hs
     }
@@ -240,14 +235,6 @@ impl Field {
         let threadnum = min(
             max(allkeys.size_hint().0 / chunks_per_thread, 1),
             max_threads,
-        );
-        println!(
-            "At least {} chunks, hence {} thread(s) to spawn",
-            allkeys.size_hint().0,
-            min(
-                max(allkeys.size_hint().0 / chunks_per_thread, 1),
-                max_threads
-            )
         );
 
         let mut splitkeysvec = vec![Vec::new(); threadnum];
@@ -279,5 +266,9 @@ impl Field {
 
     pub fn is_empty(&self) -> bool {
         self.vec.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.vec.clear();
     }
 }

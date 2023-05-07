@@ -62,7 +62,6 @@ impl Canvas {
             let mut lastclickedcoords = (0, 0);
             let mut lastsetfieldcoords = (0, 0);
 
-            //let surf = surf.clone();
             let field = field.clone();
             let xoffsetref = xoffsetref.clone();
             let yoffsetref = yoffsetref.clone();
@@ -70,10 +69,7 @@ impl Canvas {
             let drawmode = drawmode.clone();
             let shaperef = shaperef.clone();
 
-            //let shaperef = shaperef.clone();
-
             move |_, ev| {
-                //let mut surf = surf.borrow();
                 let mut field = field.borrow_mut();
 
                 match ev {
@@ -111,8 +107,6 @@ impl Canvas {
                     }
                     Event::Drag => {
                         if app::event_mouse_button() == MouseButton::Left {
-                            //println!("Drag left");
-
                             let coords = app::event_coords();
 
                             let newxoffset =
@@ -127,30 +121,26 @@ impl Canvas {
                             true
                         } else if app::event_mouse_button() == MouseButton::Right
                             && shaperef.borrow().is_none()
+                            && *drawmode.borrow()
                         {
-                            //println!("Drag right");
-                            if *drawmode.borrow()
-                                && app::event_mouse_button() == app::MouseButton::Right
-                            {
-                                let coords = app::event_coords();
+                            let coords = app::event_coords();
 
-                                let xoffset = *xoffsetref.borrow();
-                                let yoffset = *yoffsetref.borrow();
-                                let linedist = *linedistref.borrow();
+                            let xoffset = *xoffsetref.borrow();
+                            let yoffset = *yoffsetref.borrow();
+                            let linedist = *linedistref.borrow();
 
-                                let xmod = (coords.0 + xoffset).rem_euclid(linedist);
-                                let ymod = (coords.1 + yoffset).rem_euclid(linedist);
+                            let xmod = (coords.0 + xoffset).rem_euclid(linedist);
+                            let ymod = (coords.1 + yoffset).rem_euclid(linedist);
 
-                                let fieldcoords = (
-                                    ((coords.0 + xoffset - xmod) / linedist) as isize,
-                                    ((coords.1 + yoffset - ymod) / linedist) as isize,
-                                );
-                                let curval = field.get_cell(fieldcoords.0, fieldcoords.1);
+                            let fieldcoords = (
+                                ((coords.0 + xoffset - xmod) / linedist) as isize,
+                                ((coords.1 + yoffset - ymod) / linedist) as isize,
+                            );
+                            let curval = field.get_cell(fieldcoords.0, fieldcoords.1);
 
-                                if fieldcoords != lastsetfieldcoords {
-                                    field.set_cell(fieldcoords, !curval);
-                                    lastsetfieldcoords = fieldcoords;
-                                }
+                            if fieldcoords != lastsetfieldcoords {
+                                field.set_cell(fieldcoords, !curval);
+                                lastsetfieldcoords = fieldcoords;
                             }
                             true
                         } else {
@@ -158,7 +148,6 @@ impl Canvas {
                         }
                     }
                     Event::MouseWheel => {
-                        //println!("MouseWheel");
                         let coords: (i32, i32) = app::event_coords();
 
                         let xoffset = *xoffsetref.borrow();
@@ -315,5 +304,9 @@ impl Canvas {
 
     pub fn is_empty(&self) -> bool {
         self.field.borrow().is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.field.borrow_mut().clear();
     }
 }
